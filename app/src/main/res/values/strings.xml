@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Chatty</string>
+
+    <string name="agents_title">Pilih pendamping</string>
+    <string name="agents_subtitle">Setiap pendamping punya wajah, suara, dan nasabahnya sendiri.</string>
+    <string name="agents_retry">Coba lagi</string>
+
+    <string name="companion_mode_voice">Mode suara</string>
+    <string name="companion_video_on">Nyalakan video</string>
+    <string name="companion_video_off">Matikan video</string>
+    <string name="companion_mode_text">Mode teks</string>
+    <string name="companion_show_face">Tampilkan wajah</string>
+    <string name="companion_start">Mulai bicara</string>
+    <string name="companion_secure_session">Sesi aman</string>
+    <string name="companion_today">Hari ini</string>
+    <string name="companion_close_voice">Tutup mode suara</string>
+    <string name="companion_menu">Menu</string>
+    <string name="starter_balance">Cek saldo</string>
+    <string name="starter_spending">Pengeluaran bulan ini</string>
+    <string name="starter_goals">Tujuan keuangan</string>
+    <string name="starter_portfolio">Portofolio saya</string>
+    <string name="companion_back">Kembali</string>
+    <string name="companion_compose_hint_named">Kirim pesan ke %1$s…</string>
+    <string name="companion_compose_hint">Tulis pertanyaan…</string>
+    <string name="companion_send">Kirim</string>
+    <string name="companion_listening_hint">Mendengarkan…</string>
+    <string name="companion_hold_to_talk">Tahan untuk bicara</string>
+    <string name="companion_mute">Bisukan suara</string>
+    <string name="companion_unmute">Nyalakan suara</string>
+    <string name="companion_handsfree_on">Aktifkan mode bebas genggam</string>
+    <string name="companion_handsfree_off">Matikan mode bebas genggam</string>
+    <string name="conversation_channel">Percakapan berjalan</string>
+    <string name="conversation_ongoing">Sedang mengobrol dengan %1$s</string>
+    <string name="conversation_end">Akhiri</string>
+    <string name="conversation_ongoing_detail">Mikrofon dan suara tetap aktif meski layar mati.</string>
+    <string name="companion_mic_tap_hint">Tahan tombol untuk bicara, atau ketuk dua kali untuk bebas genggam.</string>
+    <string name="companion_mic_hint_hold">Tahan untuk bicara · ketuk 2× untuk bebas genggam</string>
+    <string name="companion_mic_hint_handsfree">Bebas genggam aktif · ketuk 2× untuk berhenti</string>
+    <string name="companion_handsfree_send">Kirim sekarang</string>
+    <string name="handsfree_timed_out">Bebas genggam dimatikan karena tidak ada suara.</string>
+
+    <string name="phase_idle">Siap</string>
+    <string name="phase_listening">Mendengarkan</string>
+    <string name="phase_thinking">Berpikir</string>
+    <string name="phase_speaking">Berbicara</string>
+
+    <string name="mic_permission_needed">Izinkan mikrofon, lalu tahan tombolnya sekali lagi.</string>
+    <string name="mic_denied">Mikrofon belum diizinkan. Gunakan ketikan, atau izinkan lewat Pengaturan.</string>
+    <string name="mic_unavailable">Perangkat ini tidak punya pengenal suara. Gunakan ketikan.</string>
+    <string name="mic_no_network">Suara butuh koneksi. Cek jaringan, lalu coba lagi.</string>
+    <string name="mic_no_match">Tidak tertangkap. Coba ulangi.</string>
+    <string name="turn_retry">Coba lagi</string>
+    <string name="turn_failed_inline">Jawaban tidak sampai.</string>
+    <string name="answer_failed">Jawaban tidak sampai. Coba tanyakan lagi.</string>
+    <string name="avatar_unavailable">Wajah tidak tersedia; percakapan berlanjut lewat teks.</string>
+</resources>

@@ -1,0 +1,14 @@
+<!-- A speech bubble: the app is one conversation, and the mark says so at 48dp. Drawn inside the
+     66dp safe zone of the 108dp adaptive canvas so no launcher mask can clip it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FAF7F2"
+        android:pathData="M34,32h40a10,10 0 0 1 10,10v22a10,10 0 0 1 -10,10h-19l-15,12v-12h-6a10,10 0 0 1 -10,-10v-22a10,10 0 0 1 10,-10z" />
+    <path
+        android:fillColor="#B3261E"
+        android:pathData="M44,49h30v5h-30z M44,60h20v5h-20z" />
+</vector>

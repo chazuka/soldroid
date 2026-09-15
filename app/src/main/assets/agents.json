@@ -1,0 +1,32 @@
+{
+  "default": {
+    "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
+    "voices": {
+      "id": "TrU3igk19A4aIUi2GAA2",
+      "en": "EXAVITQu4vr4xnSDxMaL"
+    }
+  },
+  "overrides": {
+    "daniel": {
+      "avatar_id": "90a94dae-8df2-4b12-99a8-5bbc34c9551e",
+      "voices": {
+        "id": "5YVVTVlHuEcIu0JBLbEF",
+        "en": "cjVigY5qzO86Huf0OWal"
+      }
+    },
+    "emma": {
+      "avatar_id": "de16689a-234a-4334-b504-3b379d30daa1",
+      "voices": {
+        "id": "TrU3igk19A4aIUi2GAA2",
+        "en": "cgSgspJ2msm6clMCkdW9"
+      }
+    },
+    "sophia": {
+      "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
+      "voices": {
+        "id": "19zQpXlAQKHlcmXgXfLr",
+        "en": "EXAVITQu4vr4xnSDxMaL"
+      }
+    }
+  }
+}
