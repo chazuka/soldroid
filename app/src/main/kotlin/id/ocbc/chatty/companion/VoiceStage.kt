@@ -280,16 +280,39 @@ fun VoiceStage(
                             // old behaviour instead: a few dp of air and no gap invented under the
                             // header.
                             val slack = (maxHeight - rendered).coerceAtLeast(0.dp)
-                            val drop = if (slack > 0.dp) {
-                                minOf(headroom, slack)
+                            if (slack > 0.dp) {
+                                // Fill everything below the header instead of merely reaching into
+                                // it. Sized by *height* — the band under the header down to the
+                                // bottom edge — and then as wide as that height makes it, which is
+                                // wider than the screen, so the sides crop rather than the picture
+                                // stopping short of the foot.
+                                //
+                                // # Why the band above stays
+                                //
+                                // It cannot be filled. The crown sits about 5% down the frame, so
+                                // putting it below a 106dp header while the frame still starts at
+                                // the screen's top edge would need a frame over 2000dp tall — the
+                                // head several times the size of the screen. Every arrangement of
+                                // this stream is a choice between a band above the picture and the
+                                // crown behind the clock, and the band is the one that keeps a face
+                                // whole. What was available was the *bottom*: the picture used to
+                                // stop about 40dp short of the screen's foot and leave slate under
+                                // it, and that slack is now part of the face.
+                                val height = maxHeight - headroom
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = headroom)
+                                    .requiredSize(width = height * streamShape, height = height)
                             } else {
-                                ((rendered - maxHeight) / 2).coerceIn(0.dp, AVATAR_DROP_MAX)
+                                // No slack: a squarer window, or a wider stream. Full width at the
+                                // frame's own shape, clipped by the parent, nudged down a touch.
+                                val drop = ((rendered - maxHeight) / 2).coerceIn(0.dp, AVATAR_DROP_MAX)
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .requiredHeight(rendered)
+                                    .offset(y = drop)
                             }
-                            Modifier
-                                .align(Alignment.TopCenter)
-                                .fillMaxWidth()
-                                .requiredHeight(rendered)
-                                .offset(y = drop)
                         },
                         idle = {
                             state.agent?.let {
