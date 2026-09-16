@@ -48,7 +48,7 @@ android {
         // Android and the app stores know the app by changes. Changing it produces a *different*
         // app: an installed build under the old id is not upgraded, it sits alongside the new one.
         applicationId = "id.ocbc.sol"
-        versionCode = 2
+        versionCode = 3
         versionName = "0.1.0-beta"
 
         // These are demo credentials in a demo app, and an APK is not a secret store: anyone holding
