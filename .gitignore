@@ -6,3 +6,8 @@ build/
 *.iml
 .kotlin/
 .DS_Store
+
+# Release signing material. The keystore is the app's identity — lose it and no future build can
+# upgrade an installed beta; leak it and anyone can ship an APK that Android accepts as this app.
+*.jks
+*.keystore

@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("chatty.android.application")
     alias(libs.plugins.ksp)
@@ -26,6 +28,17 @@ fun secret(name: String): String =
     dotenv[name]?.takeIf(String::isNotEmpty)
         ?: providers.environmentVariable(name).getOrElse("")
 
+/**
+ * The keystore the release build is signed with, or `null` when this machine does not have one.
+ *
+ * `KEYSTORE_PATH` may be absolute or relative to the repo root, so a build agent can point at a
+ * keystore it decoded into a temp directory while a laptop points at one next to the checkout.
+ */
+val releaseKeystore: File? = secret("KEYSTORE_PATH")
+    .takeIf(String::isNotEmpty)
+    ?.let { path -> File(path).takeIf(File::isAbsolute) ?: rootProject.file(path) }
+    ?.takeIf(File::exists)
+
 android {
     namespace = "id.ocbc.chatty"
 
@@ -52,17 +65,51 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        // Only declared when the keystore is actually present: an absent-file signing config fails
+        // the whole configuration phase, which would break `assembleDebug` for anyone who has no
+        // keystore and does not need one.
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = secret("KEYSTORE_PASSWORD")
+                keyAlias = secret("KEY_ALIAS")
+                keyPassword = secret("KEY_PASSWORD").ifEmpty { secret("KEYSTORE_PASSWORD") }
+
+                // minSdk is 29, so every device that can install this APK verifies v3, and v3 is
+                // what lets the key be rotated later without breaking upgrade installs. v1 (JAR
+                // signing) is left off deliberately: it is slow to verify, it is the scheme the
+                // Janus/Master Key class of bugs attacked, and nothing here can run on a device old
+                // enough to need it. AGP emits only the schemes minSdk requires, so the v2 flag is
+                // a no-op today and correctness insurance if minSdk ever drops below 28.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
 
-            // A demo has no release keystore, and an unsigned release APK cannot be installed on the
-            // handset it is meant to be shown on. Signing with the debug key keeps `assembleRelease`
-            // runnable — and therefore keeps R8 honest, since shrinking only breaks in release —
-            // while making it obvious this is not a distributable build.
-            signingConfig = signingConfigs.getByName("debug")
+            // Beta builds are sideloaded, not uploaded to Play, so the only thing the key has to
+            // do is stay the same between releases: Android refuses to upgrade an installed app
+            // whose signature changed, and the tester would have to uninstall and lose their data.
+            //
+            // Falling back to the debug key when no keystore is configured keeps `assembleRelease`
+            // runnable — and therefore keeps R8 honest, since shrinking only ever breaks in release
+            // — but such an APK must not be handed to a tester, hence the warning.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug").also {
+                    logger.warn(
+                        "KEYSTORE_PATH is unset or missing: signing the release build with the " +
+                            "debug key. This APK is for local checks only — do not distribute it, " +
+                            "because the next build signed with the real key cannot upgrade it."
+                    )
+                }
         }
     }
 
