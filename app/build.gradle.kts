@@ -31,8 +31,8 @@ android {
 
     defaultConfig {
         applicationId = "id.ocbc.chatty"
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.0-beta"
 
         // These are demo credentials in a demo app, and an APK is not a secret store: anyone holding
         // the file can read them back out. That is the accepted cost of having no backend — the
