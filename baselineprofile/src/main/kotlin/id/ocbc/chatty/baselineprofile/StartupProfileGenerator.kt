@@ -44,6 +44,8 @@ class StartupProfileGenerator {
     }
 
     private companion object {
-        const val PACKAGE_NAME = "id.ocbc.chatty"
+        // The applicationId from `:app`, not this file's own package: UI Automator launches the
+        // app the way the launcher does, by install id. Keep in step with `app/build.gradle.kts`.
+        const val PACKAGE_NAME = "id.ocbc.sol"
     }
 }
