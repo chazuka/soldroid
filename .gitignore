@@ -11,3 +11,6 @@ build/
 # upgrade an installed beta; leak it and anyone can ship an APK that Android accepts as this app.
 *.jks
 *.keystore
+
+# Distributable build artifacts.
+dist/
