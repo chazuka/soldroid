@@ -182,7 +182,7 @@ private fun CustomerPickerScreen(
 }
 
 /**
- * The badge, the question, and the model row.
+ * The badge, the question, and — on an evaluation build — the model row.
  *
  * # Why the spacing is tiered and not uniform
  *
@@ -192,9 +192,9 @@ private fun CustomerPickerScreen(
  * dense block with dead space underneath it.
  *
  * Now the rhythm has tiers: 16 between the badge and the heading, 12 between heading and
- * subheading, 24 before the model row and 24 again before the cards. Tight inside a group, generous
- * between groups — the badge, title and subtitle belong to each other, and the list is somewhere
- * else.
+ * subheading, and 24 before the cards — plus 24 more above the model row on a build that shows it.
+ * Tight inside a group, generous between groups — the badge, title and subtitle belong to each
+ * other, and the list is somewhere else.
  */
 @Composable
 private fun Header(
@@ -228,7 +228,6 @@ private fun Header(
             color = MaterialTheme.colorScheme.onSurfaceSecondary,
         )
 
-        Spacer(Modifier.height(Spacing.xl))
         BrainPicker(available = state.brains, selected = brain, onSelect = onBrainChange)
 
         // The one place the network shows on this screen. A line rather than a spinner, because the
@@ -284,6 +283,22 @@ private fun CoachBadge() {
 }
 
 /**
+ * Whether this screen offers the model chooser at all.
+ *
+ * Off. Every conversation runs on `Brain.Default` — the stack labelled "Model 1" — and the customer
+ * is never asked which. The three anonymous buttons are an evaluation control: they exist so someone
+ * comparing answers can switch stacks without a brand on the button telling them what to think. A
+ * customer has neither that question nor any way to answer it, so on a product build the row is
+ * noise sitting between the heading and the thing the screen is actually for.
+ *
+ * Only the control goes. Every brain the build has a key for is still constructed and still
+ * reachable, the choice still travels from the app root into the conversation, and the turn trace
+ * still records which stack answered — so flipping this to `true` restores the comparison with no
+ * other change.
+ */
+private const val MODEL_CHOOSER_VISIBLE = false
+
+/**
  * Which model answers, above the customers rather than inside them.
  *
  * # Why it sits here and not on the cards
@@ -296,11 +311,16 @@ private fun CoachBadge() {
  * Hidden entirely when only one model is available, because a chooser with one option is furniture —
  * which is also what keeps this off the screen in a single-key build, where the design has no such
  * control.
+ *
+ * It also owns the gap above itself. The row is optional in two different ways, so the 24dp that
+ * separates it from the subheading has to come and go with it; left behind in the caller it would
+ * strand an empty band between the question and the cards on every build that hides the row.
  */
 @Composable
 private fun BrainPicker(available: List<Brain>, selected: Brain, onSelect: (Brain) -> Unit) {
-    if (available.size < 2) return
+    if (!MODEL_CHOOSER_VISIBLE || available.size < 2) return
 
+    Spacer(Modifier.height(Spacing.xl))
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
         available.forEachIndexed { index, brain ->
             SegmentedButton(
