@@ -48,7 +48,7 @@ android {
         // Android and the app stores know the app by changes. Changing it produces a *different*
         // app: an installed build under the old id is not upgraded, it sits alongside the new one.
         applicationId = "id.ocbc.sol"
-        versionCode = 3
+        versionCode = 4
         versionName = "0.1.0-beta"
 
         // These are demo credentials in a demo app, and an APK is not a secret store: anyone holding
@@ -98,6 +98,17 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // Handsets only. LiveKit's WebRTC library ships a ~12-16MB native binary per ABI, and
+            // the two x86 variants exist for emulators — which never receive a distributed APK.
+            // Dropping them halves the download a tester pays for.
+            //
+            // Scoped to `release` on purpose: debug builds keep every ABI, so an emulator remains a
+            // working development target. If a release build ever has to run on one, build the
+            // debug variant instead of widening this.
+            ndk {
+                abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+            }
 
             // Beta builds are sideloaded, not uploaded to Play, so the only thing the key has to
             // do is stay the same between releases: Android refuses to upgrade an installed app

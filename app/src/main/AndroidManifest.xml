@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Hold-to-talk. Transcription happens on the device; the recording itself never leaves it —
@@ -15,6 +16,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      LiveKit's manifest declares CAMERA and MEDIA_PROJECTION because its SDK can publish a local
+      video track or a screen share. This app never does either: the avatar arrives as a remote
+      track and is only ever subscribed to. Left in place the permissions would show on the install
+      listing — an OCBC-branded app asking for the camera — for a capability that cannot be reached.
+
+      If a future screen does publish video, delete the matching line here rather than requesting
+      the permission somewhere else, or the merged manifest will silently keep it out.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove" />
 
     <!-- Android 11+ package visibility: without this the system speech recogniser is invisible to
          the app and `SpeechRecognizer.isRecognitionAvailable` answers false on a device that has one. -->
