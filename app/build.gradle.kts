@@ -43,7 +43,11 @@ android {
     namespace = "id.ocbc.chatty"
 
     defaultConfig {
-        applicationId = "id.ocbc.chatty"
+        // The install identity, deliberately not the source package. `namespace` above stays
+        // `id.ocbc.chatty`, so R, BuildConfig and every Kotlin file keep their package; only the id
+        // Android and the app stores know the app by changes. Changing it produces a *different*
+        // app: an installed build under the old id is not upgraded, it sits alongside the new one.
+        applicationId = "id.ocbc.sol"
         versionCode = 2
         versionName = "0.1.0-beta"
 
