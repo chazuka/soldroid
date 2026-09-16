@@ -332,7 +332,7 @@ private fun CompanionScreen(
                 rearm += 1
             }
         },
-        languageTag = state.language.tag,
+        languageTag = state.listenFor.tag,
     )
     val listening by speech.listening
     val partial by speech.partial

@@ -87,10 +87,30 @@ data class CompanionUiState(
     val muted: Boolean = false,
 
     /**
-     * The language this conversation is happening in. Picks the recogniser's model and the agent's
-     * voice together, so the question and the answer can never end up in different languages.
+     * The language this conversation is *answered* in: the agent's voice and the number speller.
+     *
+     * Follows the words actually being spoken, so a question asked in English is answered in English
+     * whatever the switch says. Changing it costs nothing and is undone by the next question, which
+     * is why it is allowed to move on a single utterance.
      */
     val language: Language = Language.INDONESIAN,
+
+    /**
+     * The language the *recogniser* is told to expect, which is deliberately not [language].
+     *
+     * # Why these are two fields
+     *
+     * They fail in opposite directions. Answering in the wrong language is a wrong voice on the
+     * right words — ugly, and corrected by the next turn. Listening in the wrong language destroys
+     * the words themselves: pinned to `id-ID`, "How much money do I have" comes back as "Oh macam
+     * mana", and nothing downstream can recover a sentence that was never transcribed.
+     *
+     * So the answer may chase every utterance, and the ear may not. This moves only when the
+     * customer says so — the switch in the header — or after they have stayed in the other language
+     * long enough that it is clearly not a one-off; see [LISTEN_SWITCH_AFTER]. Between those, the
+     * platform's own bilingual switching does the adapting, which is what it is for.
+     */
+    val listenFor: Language = Language.INDONESIAN,
     val notice: Notice? = null,
 
     /**
@@ -267,9 +287,11 @@ class CompanionViewModel @Inject constructor(
         // The switch in the header keeps its job: it decides ambiguous input, and it is what a
         // customer reaches for when they want the reply in the other language than they asked in.
         val spoken = Language.detect(text)
+        val listenFor = listenLanguageFor(spoken)
         _state.update {
             it.copy(
                 language = spoken ?: it.language,
+                listenFor = listenFor,
                 transcript = history,
                 draft = "",
                 caption = null,
@@ -538,7 +560,25 @@ class CompanionViewModel @Inject constructor(
      */
     fun setLanguage(language: Language) {
         if (!_state.value.acceptingInput) return
-        _state.update { it.copy(language = language) }
+        // An explicit choice moves the ear at once and with no streak to serve out. The customer
+        // said which language they are about to speak; there is nothing left to infer.
+        offLanguageStreak = 0
+        _state.update { it.copy(language = language, listenFor = language) }
+    }
+
+    /**
+     * How many questions in a row have come in a language the recogniser is not listening for.
+     *
+     * Not in [CompanionUiState] because nothing draws it — it is the evidence behind [listenFor],
+     * not a thing the screen has any business knowing.
+     */
+    private var offLanguageStreak = 0
+
+    /** Applies [ListenLanguage] to this conversation, carrying the streak across questions. */
+    private fun listenLanguageFor(spoken: Language?): Language {
+        val next = ListenLanguage.next(_state.value.listenFor, spoken, offLanguageStreak)
+        offLanguageStreak = next.streak
+        return next.language
     }
 
     /** Silences or restores the avatar's voice on this device, independent of language or turn state. */
