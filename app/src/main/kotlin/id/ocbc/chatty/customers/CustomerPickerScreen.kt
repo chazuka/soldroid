@@ -182,7 +182,7 @@ private fun CustomerPickerScreen(
 }
 
 /**
- * The badge, the question, and — on an evaluation build — the model row.
+ * The badge, the question, and — when [MODEL_CHOOSER_VISIBLE] — the model row.
  *
  * # Why the spacing is tiered and not uniform
  *
@@ -285,18 +285,17 @@ private fun CoachBadge() {
 /**
  * Whether this screen offers the model chooser at all.
  *
- * Off. Every conversation runs on `Brain.Default` — the stack labelled "Model 1" — and the customer
- * is never asked which. The three anonymous buttons are an evaluation control: they exist so someone
- * comparing answers can switch stacks without a brand on the button telling them what to think. A
- * customer has neither that question nor any way to answer it, so on a product build the row is
- * noise sitting between the heading and the thing the screen is actually for.
+ * On. The three anonymous buttons are an evaluation control: they let whoever is comparing answers
+ * switch stacks without a brand on the button telling them what to think, and a beta is exactly the
+ * audience that question is for. Turn it off for a build shown to customers, who have neither the
+ * question nor a way to answer it — there the row is noise between the heading and the thing the
+ * screen is actually for, and every conversation simply runs on `Brain.Default`.
  *
- * Only the control goes. Every brain the build has a key for is still constructed and still
- * reachable, the choice still travels from the app root into the conversation, and the turn trace
- * still records which stack answered — so flipping this to `true` restores the comparison with no
- * other change.
+ * Only the control is conditional. Every brain the build has a key for is constructed and reachable
+ * either way, the choice still travels from the app root into the conversation, and the turn trace
+ * still records which stack answered — so this flag moves nothing but the row.
  */
-private const val MODEL_CHOOSER_VISIBLE = false
+private const val MODEL_CHOOSER_VISIBLE = true
 
 /**
  * Which model answers, above the customers rather than inside them.
