@@ -2,8 +2,8 @@
   "default": {
     "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
     "voices": {
-      "id": "vkW2LzXraZVeZ5G7Yv7c",
-      "en": "Xb7hH8MSUJpSbSDYk0k2"
+      "id": "TrU3igk19A4aIUi2GAA2",
+      "en": "EXAVITQu4vr4xnSDxMaL"
     }
   },
   "overrides": {
@@ -22,9 +22,9 @@
       }
     },
     "ayu": {
-      "avatar_id": "de82b2cc-7314-40a1-b41f-cc456c66601c",
+      "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
       "voices": {
-        "id": "DPPzLATaOfLZsVFY8RtJ",
+        "id": "19zQpXlAQKHlcmXgXfLr",
         "en": "EXAVITQu4vr4xnSDxMaL"
       }
     }

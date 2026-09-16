@@ -16,10 +16,6 @@ import kotlinx.coroutines.sync.withLock
  * they meet — so a persona the API adds tomorrow appears in the list immediately, wearing the
  * default face and voice until someone gives it its own.
  *
- * That default is deliberately nobody: its face and both its voices belong to no configured persona.
- * Borrowing one would make an unrecognised agent impersonate a real advisor, and the demo would look
- * correct while being wrong — the worst way for a mapping mistake to fail.
- *
  * Cached for the life of the process: the list is three rows that change when a deployment changes,
  * and re-fetching it every time the customer backs out of a conversation buys nothing.
  */
