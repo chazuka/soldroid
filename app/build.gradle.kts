@@ -29,6 +29,70 @@ fun secret(name: String): String =
         ?: providers.environmentVariable(name).getOrElse("")
 
 /**
+ * Runs a git command in the repo, or returns `null` when git cannot answer.
+ *
+ * Every call goes through `providers.exec` so the configuration cache records it as an input: the
+ * version is re-derived when the repository moves, and stays cached when it has not. `null` covers
+ * the cases that are not failures — a source archive with no `.git`, a shallow clone with no tags,
+ * git not installed on the machine.
+ */
+fun git(vararg args: String): String? {
+    val output = providers.exec {
+        commandLine(listOf("git", *args))
+        workingDir = rootDir
+        isIgnoreExitValue = true
+    }
+    if (output.result.get().exitValue != 0) return null
+    return output.standardOutput.asText.get().trim().ifEmpty { null }
+}
+
+private val releaseTag: String? = git("describe", "--tags", "--abbrev=0")
+private val commitsSinceTag: Int = releaseTag?.let { git("rev-list", "--count", "$it..HEAD") }?.toIntOrNull() ?: 0
+private val headSha: String? = git("rev-parse", "--short=7", "HEAD")
+private val treeIsDirty: Boolean = git("status", "--porcelain") != null
+
+/**
+ * What the app calls itself, derived from the release tag rather than typed into this file.
+ *
+ * The convention is one annotated tag per artifact that leaves the machine, named `v` plus the
+ * version: `v0.1.0-alpha.1`, `v0.1.0-beta.2`, `v0.1.0`. The tag is the record of what was built; the
+ * channel is a semver pre-release label, so version ordering already knows alpha precedes beta
+ * precedes stable, and no build logic has to be taught the names.
+ *
+ * Built exactly on a clean tag, the name is the tag: `0.1.0-beta`. Anywhere else it says so —
+ * `0.1.0-beta+2.g18a9cbc`, plus `.dirty` for uncommitted changes — so an APK from a work in progress
+ * can never be mistaken for the release it came after. Override with `-PappVersionName=…` when a
+ * build agent knows better than the checkout does.
+ */
+val appVersionName: String = (findProperty("appVersionName") as String?)
+    ?: releaseTag?.removePrefix("v")?.let { tag ->
+        when {
+            commitsSinceTag == 0 && !treeIsDirty -> tag
+            else -> buildString {
+                append(tag)
+                append("+").append(commitsSinceTag)
+                headSha?.let { append(".g").append(it) }
+                if (treeIsDirty) append(".dirty")
+            }
+        }
+    }
+    ?: "0.0.0-dev"
+
+/**
+ * The number Android actually compares on upgrade, taken as the commit count on the current branch.
+ *
+ * It only has to rise, and a commit count does that for free: it needs no file to edit, no counter
+ * to remember, and it cannot go backwards on a branch that only gains commits. `versionName` carries
+ * the meaning; this carries the ordering, and the two are deliberately not derived from each other.
+ *
+ * The fallback of `1` is for a checkout with no history at all, where any number would be a guess —
+ * a build agent in that position passes `-PappVersionCode=…`, which also wins over git when set.
+ */
+val appVersionCode: Int = (findProperty("appVersionCode") as String?)?.toIntOrNull()
+    ?: git("rev-list", "--count", "HEAD")?.toIntOrNull()
+    ?: 1
+
+/**
  * The keystore the release build is signed with, or `null` when this machine does not have one.
  *
  * `KEYSTORE_PATH` may be absolute or relative to the repo root, so a build agent can point at a
@@ -48,8 +112,8 @@ android {
         // Android and the app stores know the app by changes. Changing it produces a *different*
         // app: an installed build under the old id is not upgraded, it sits alongside the new one.
         applicationId = "id.ocbc.sol"
-        versionCode = 4
-        versionName = "0.1.0-beta"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         // These are demo credentials in a demo app, and an APK is not a secret store: anyone holding
         // the file can read them back out. That is the accepted cost of having no backend — the
@@ -144,6 +208,52 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
 }
+
+/**
+ * Prints the version this checkout would build, for a release script that has to name the artifact.
+ *
+ * ```
+ * $ ./gradlew -q :app:printVersion
+ * 0.1.0-beta 21
+ * $ cp app/build/outputs/apk/release/app-release.apk \
+ *     "dist/ocbc-sol-$(./gradlew -q :app:printVersion | cut -d' ' -f1).apk"
+ * ```
+ */
+tasks.register("printVersion") {
+    group = "help"
+    description = "Prints the derived versionName and versionCode."
+    // Read at configuration time: a task body may not reach into the project once the
+    // configuration cache is on.
+    val name = appVersionName
+    val code = appVersionCode
+    doLast { println("$name $code") }
+}
+
+/**
+ * Fails unless this checkout is exactly a clean release tag, so a distributable is never cut from a
+ * tree that cannot be reproduced.
+ *
+ * Run it before handing an APK to anyone:
+ *
+ * ```
+ * $ ./gradlew :app:verifyReleaseVersion :app:assembleRelease
+ * ```
+ *
+ * Deliberately not wired into `assembleRelease` itself — building a release locally to check that R8
+ * has not broken anything is routine, and should not require committing first.
+ */
+tasks.register("verifyReleaseVersion") {
+    group = "verification"
+    description = "Fails when the working tree is not exactly on a clean release tag."
+    val name = appVersionName
+    doLast {
+        check(!name.contains('+')) {
+            "Version is '$name': HEAD is not a clean release tag. Commit, then tag it " +
+                "`git tag -a v<version> -m <version>`, or pass -PappVersionName= to override."
+        }
+    }
+}
+
 
 dependencies {
     implementation(project(":core:ai"))
