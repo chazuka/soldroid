@@ -244,8 +244,32 @@ class CompanionViewModel @Inject constructor(
         if (text.isEmpty() || !current.acceptingInput) return
 
         val history = current.transcript + TranscriptEntry(Speaker.CUSTOMER, text)
+        // The language of the *question*, adopted before the turn runs.
+        //
+        // # Why the question and not the answer
+        //
+        // [spokenLanguageFor] already reads the answer, but it reads the first clause of it and then
+        // latches for the rest of the turn — and a first clause is often "Halo Michael," or "Hi
+        // Michael,", which carries no function words and detects as nothing. It then falls back to
+        // whatever the switch last said, and the whole answer is spoken in that voice. Ask in
+        // English with the switch on ID and the reply is English words in an Indonesian voice, with
+        // the number speller reading "Rp1,200,000" as "satu koma dua rupiah".
+        //
+        // A whole question is a far stronger signal than an answer's opening fragment, and it
+        // arrives one step earlier — before the model is called, before a sample is synthesized. So
+        // the language follows whoever is talking, which is what a bilingual customer means by
+        // switching mid-conversation. The answer's own detection stays as the correction for a
+        // question too short to read.
+        //
+        // This also points the recogniser at the right model for the *next* question, which is the
+        // difference between hearing "How much money do I have" and transliterating it.
+        //
+        // The switch in the header keeps its job: it decides ambiguous input, and it is what a
+        // customer reaches for when they want the reply in the other language than they asked in.
+        val spoken = Language.detect(text)
         _state.update {
             it.copy(
+                language = spoken ?: it.language,
                 transcript = history,
                 draft = "",
                 caption = null,

@@ -37,6 +37,23 @@ class LanguageDetectTest {
     }
 
     @Test
+    fun `an answer's opening clause is not enough to go on`() {
+        // Why the turn's language is taken from the question and not from the first thing the model
+        // says. A greeting carries no function words, so detection abstains — and the caller that
+        // asked at that moment latches the fallback for the whole answer.
+        assertNull(Language.detect("Halo Michael,"))
+        assertNull(Language.detect("Hi Michael,"))
+    }
+
+    @Test
+    fun `a spoken question is long enough to decide the turn`() {
+        // The same turn, read from the question instead: both are unambiguous, which is what makes
+        // the voice and the number speller right from the first clause rather than the second.
+        assertEquals(Language.ENGLISH, Language.detect("How much money do I have in my account"))
+        assertEquals(Language.INDONESIAN, Language.detect("Berapa uang yang ada di rekening saya"))
+    }
+
+    @Test
     fun `one borrowed word does not flip a sentence`() {
         assertEquals(
             Language.INDONESIAN,
