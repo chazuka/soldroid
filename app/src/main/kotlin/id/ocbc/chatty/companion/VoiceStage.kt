@@ -14,6 +14,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -209,6 +212,12 @@ fun VoiceStage(
         }
 
         if (mode == CompanionMode.VIDEO) {
+            // How far down the screen the overlaid header reaches: the status bar, plus the band the
+            // header itself occupies. The picture is pushed past it so the crown is never behind a
+            // button. Read from the window rather than assumed, because the status bar is a
+            // different height on a device with a cutout than on one without.
+            val headroom = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
+                Spacing.md + HEADER_BUTTON + Spacing.sm
             val picture = @Composable { modifier: Modifier ->
                 BoxWithConstraints(modifier.then(Modifier.clipToBounds())) {
                     // Edge to edge while the frame is taller than it is wide, which is canvas 14B
@@ -254,7 +263,23 @@ fun VoiceStage(
                             // what leaves the screen is chest. Letterboxed to the stream's shape
                             // instead, the face came out a 590px sliver on a 2856px screen.
                             val rendered = maxWidth / streamShape
-                            val drop = ((rendered - maxHeight) / 2).coerceIn(0.dp, AVATAR_DROP_MAX)
+                            // Upright the picture is now the whole screen and the header floats on
+                            // it, so the crown has to be pushed below the header rather than merely
+                            // given a touch of air. The frame is dropped by the band the header
+                            // occupies, but never by more than the slack the box actually has: on a
+                            // 19.5:9 screen a 9:16 stream drawn full width leaves roughly a third of
+                            // the height spare, which is far more than the header needs, and the
+                            // remainder falls at the foot where the controls and their scrim sit.
+                            //
+                            // A screen with no slack — a squarer window, a wider stream — gets the
+                            // old behaviour instead: a few dp of air and no gap invented under the
+                            // header.
+                            val slack = (maxHeight - rendered).coerceAtLeast(0.dp)
+                            val drop = if (slack > 0.dp) {
+                                minOf(headroom, slack)
+                            } else {
+                                ((rendered - maxHeight) / 2).coerceIn(0.dp, AVATAR_DROP_MAX)
+                            }
                             Modifier
                                 .align(Alignment.TopCenter)
                                 .fillMaxWidth()
@@ -286,15 +311,6 @@ fun VoiceStage(
                     // across 590px of that strip is a column two words wide laid over a face; in
                     // the space beside it the same four lines read as a sentence. So on a short
                     // screen the words belong to the column, not to the picture.
-                    if (!compact) {
-                        words(
-                            Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .padding(horizontal = Spacing.xl)
-                                .padding(bottom = Spacing.lg),
-                        )
-                    }
                 }
             }
             val controls = @Composable {
@@ -351,39 +367,62 @@ fun VoiceStage(
                     }
                 }
             } else {
-                // The header sits on the slate, above the picture — not over it, as the canvas draws
-                // it.
+                // Upright the face is the screen, and everything else floats on it — the canvas's
+                // own composition, which earlier versions could not afford.
                 //
-                // # Why the canvas is departed from here
+                // # Why this is affordable now and was not before
                 //
                 // LiveAvatar composes tightly: measured, the stream carries about 5% of headroom
-                // over the subject, which is some 31dp once it fills a handset. That is the entire
-                // budget, and it does not grow. Drawn edge to edge the crown landed 26dp down the
-                // screen, behind the clock, and with the header laid over the picture it was behind
-                // that too. The canvas's asset has room to spare above its subject and can afford
-                // the overlay; this stream cannot.
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = Spacing.xl)
-                        .padding(top = Spacing.md, bottom = Spacing.sm),
-                ) {
-                    header()
-                }
-                picture(Modifier.weight(1f).fillMaxWidth())
-                // A solid bar, not more overlay: the canvas ends the picture where the controls
-                // begin, and a microphone floating over someone's chest is a control you hesitate
-                // over.
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(StageColors.base)
-                        .navigationBarsPadding()
-                        .padding(horizontal = Spacing.xl)
-                        .padding(top = Spacing.md, bottom = STAGE_BOTTOM_PADDING),
-                ) {
-                    controls()
+                // over the subject, some 31dp once it fills a handset, and it does not grow. Drawn
+                // edge to edge and top-anchored, the crown landed 26dp down the screen — behind the
+                // clock, and behind any header laid over it. The band above the picture was the fix.
+                //
+                // Full-bleed, the geometry changes: a 9:16 stream drawn full width on a 19.5:9
+                // screen is about a third shorter than the screen, and that surplus is a budget the
+                // banded layout never had. Spending it as a downward push puts the crown below the
+                // header by construction rather than by luck, and the remainder falls at the foot,
+                // under the controls, where the bottom scrim already darkens the frame for the
+                // caption. Nothing is cropped that was visible before; the picture simply reaches
+                // the edges it used to stop short of.
+                Box(Modifier.fillMaxSize()) {
+                    picture(Modifier.fillMaxSize())
+                    Column(Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = Spacing.xl)
+                                .padding(top = Spacing.md, bottom = Spacing.sm),
+                        ) {
+                            header()
+                        }
+                        // The caption takes whatever is left between the header and the controls and
+                        // sits at the bottom of it, so a one-line answer rides just above the
+                        // microphone instead of floating in the middle of someone's face. Bounded,
+                        // not wrapped: the exchange scrolls inside this rather than growing through
+                        // the controls when a reply runs long.
+                        words(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.xl)
+                                .padding(bottom = Spacing.lg)
+                                .wrapContentHeight(Alignment.Bottom),
+                        )
+                        // Over the picture now, not on a bar of their own. The hesitation a
+                        // microphone floating over a chest used to cause came from it sitting on a
+                        // live, moving image; the bottom scrim is opaque enough by then that the
+                        // controls read as sitting on ground, and the face above them is unbroken.
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(horizontal = Spacing.xl)
+                                .padding(top = Spacing.md, bottom = STAGE_BOTTOM_PADDING),
+                        ) {
+                            controls()
+                        }
+                    }
                 }
             }
         } else {
