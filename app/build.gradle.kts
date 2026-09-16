@@ -94,6 +94,18 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A separate install identity, so a debug build and a signed beta can sit on the same
+            // handset at once. Without it both are `id.ocbc.sol` signed by different keys, and
+            // Android rejects the second install with INSTALL_FAILED_UPDATE_INCOMPATIBLE — which
+            // shows up as Android Studio's Run silently failing right after the build succeeds.
+            //
+            // The suffix touches the applicationId only. `namespace` is unchanged, so R and
+            // BuildConfig keep their package, and `:baselineprofile` still targets the release id
+            // because it drives the nonMinifiedRelease variant rather than this one.
+            applicationIdSuffix = ".debug"
+        }
+
         release {
             isMinifyEnabled = true
             isShrinkResources = true
