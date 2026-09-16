@@ -14,6 +14,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
@@ -663,43 +668,76 @@ private fun Exchange(
     val live = listening && partial.isNotEmpty()
     val question = if (live) liveTail(partial) else lastQuestion
 
+    // Over a face the words are a caption, not a document: two lines of question and two of answer,
+    // always the newest two, the way broadcast subtitles behave. The customer is *listening* — the
+    // text is there to confirm what was heard and to carry the room when the audio is muted, and a
+    // wall of it buried the picture it was drawn on.
+    //
+    // Off the stage there is nothing to bury, so the answer stays whole and scrolls.
+    val caption = mode == CompanionMode.VIDEO
+
     val scroll = rememberScrollState()
     // Follow the answer down as it is written, so the line on screen is the line being spoken. The
     // agent is talking through this text at the same time, and a reader left at the top would be
     // looking at a sentence that finished several seconds ago. Only while it is still streaming —
     // once the answer is whole the view stays where the customer left it.
-    LaunchedEffect(answer, streaming) {
-        if (streaming) scroll.animateScrollTo(scroll.maxValue)
+    //
+    // Nothing to follow when the text is clamped: the tail is always on screen by construction, and
+    // an animation running per token for no visible effect is work the stage cannot spare.
+    LaunchedEffect(answer, streaming, caption) {
+        if (streaming && !caption) scroll.animateScrollTo(scroll.maxValue)
     }
 
     Column(
         modifier = modifier
             .widthIn(max = EXCHANGE_MAX_WIDTH)
-            // A line sliced off at the edge of a scroll region reads as a rendering fault. Fading it
-            // out says the text continues and that a drag will reach it — the only affordance a
-            // scroll region with no scrollbar has.
-            //
-            // The fade masks the content's alpha rather than painting a scrim over it. A scrim has
-            // to match the background it sits on, and the background here is a gradient: any single
-            // colour shows up as a lighter band. Masking is background-independent, so it is correct
-            // at every point on the gradient and in both themes.
-            .fadingEdges(top = scroll.canScrollBackward, bottom = scroll.canScrollForward)
-            // The answer can run past the space reserved for it — a long reply, a large system font
-            // — and when it does the customer should be able to read the rest rather than have it
-            // silently cut. A drag here is a scroll and a tap still reaches the stage behind, so
-            // barge-in survives.
-            .verticalScroll(scroll),
+            .then(
+                if (caption) {
+                    // Clamped text needs neither, and both cost: the fade masks through an
+                    // offscreen layer every frame, and the scroll container measures content that
+                    // can no longer overflow it.
+                    Modifier
+                } else {
+                    Modifier
+                        // A line sliced off at the edge of a scroll region reads as a rendering
+                        // fault. Fading it out says the text continues and that a drag will reach
+                        // it — the only affordance a scroll region with no scrollbar has.
+                        //
+                        // The fade masks the content's alpha rather than painting a scrim over it.
+                        // A scrim has to match the background it sits on, and the background here is
+                        // a gradient: any single colour shows up as a lighter band. Masking is
+                        // background-independent, so it is correct at every point on the gradient
+                        // and in both themes.
+                        .fadingEdges(top = scroll.canScrollBackward, bottom = scroll.canScrollForward)
+                        // The answer can run past the space reserved for it — a long reply, a large
+                        // system font — and when it does the customer should be able to read the
+                        // rest rather than have it silently cut. A drag here is a scroll and a tap
+                        // still reaches the stage behind, so barge-in survives.
+                        .verticalScroll(scroll)
+                },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         AnimatedVisibility(visible = question != null, enter = fadeIn(), exit = fadeOut()) {
+            val quoted = "“${question.orEmpty()}”"
+            val questionStyle = if (mode == CompanionMode.VIDEO) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.headlineSmall
+            }
+            if (caption) {
+                TailText(
+                    text = AnnotatedString(quoted),
+                    maxLines = CAPTION_MAX_LINES,
+                    style = questionStyle,
+                    color = Color.White,
+                    modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
+                )
+            } else {
             Text(
-                text = "“${question.orEmpty()}”",
-                style = if (mode == CompanionMode.VIDEO) {
-                    MaterialTheme.typography.titleLarge
-                } else {
-                    MaterialTheme.typography.headlineSmall
-                },
+                text = quoted,
+                style = questionStyle,
                 color = Color.White,
                 textAlign = TextAlign.Center,
                 // A settled question is history and two lines of it is plenty; the whole thing is a
@@ -709,14 +747,11 @@ private fun Exchange(
                 // question land without the words climbing over the picture they are drawn on.
                 // A settled question is history and two lines of it is plenty — the whole thing is a
                 // tap away in text mode.
-                maxLines = when {
-                    !live -> QUESTION_MAX_LINES
-                    mode == CompanionMode.VIDEO -> LIVE_QUESTION_MAX_LINES_AVATAR
-                    else -> LIVE_QUESTION_MAX_LINES
-                },
+                maxLines = if (live) LIVE_QUESTION_MAX_LINES else QUESTION_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
             )
+            }
         }
         // Three dots while the model composes. There is a measured ~3.8 s before the first token,
         // and without a sign of life that gap reads as a dropped request.
@@ -728,16 +763,18 @@ private fun Exchange(
             TypingDotsOverPhoto()
         }
         AnimatedVisibility(visible = answer != null, enter = fadeIn(), exit = fadeOut()) {
-            Text(
-                text = streamingText(answer.orEmpty(), streaming = streaming),
-                style = if (mode == CompanionMode.VIDEO) {
-                    MaterialTheme.typography.bodyMedium
-                } else {
-                    MaterialTheme.typography.bodyLarge
-                },
-                color = Color.White.copy(alpha = ANSWER_ALPHA),
-                textAlign = TextAlign.Center,
-            )
+            val body = streamingText(answer.orEmpty(), streaming = streaming)
+            val answerStyle = if (mode == CompanionMode.VIDEO) {
+                MaterialTheme.typography.bodyMedium
+            } else {
+                MaterialTheme.typography.bodyLarge
+            }
+            val answerColor = Color.White.copy(alpha = ANSWER_ALPHA)
+            if (caption) {
+                TailText(text = body, maxLines = CAPTION_MAX_LINES, style = answerStyle, color = answerColor)
+            } else {
+                Text(text = body, style = answerStyle, color = answerColor, textAlign = TextAlign.Center)
+            }
         }
         // The turn failed and produced nothing. On the stage there is no thread to fall back on, so
         // the way out has to be here or the customer is left looking at a face that said nothing.
@@ -766,6 +803,74 @@ private fun Exchange(
             )
         }
     }
+}
+
+/**
+ * Text clamped to its last [maxLines] lines — a caption, not a paragraph.
+ *
+ * # Why the tail and not the head
+ *
+ * Over a face the words track speech that is happening *now*. Clamping a growing answer with
+ * `maxLines` alone keeps the opening two lines and hides everything after, so the caption freezes on
+ * a sentence that finished seconds ago while the agent talks on. Broadcast subtitles solve this by
+ * scrolling the window forward, and this is that: the first line is dropped whenever the text
+ * outgrows the box, so what is on screen is always the newest thing said.
+ *
+ * # How it finds the window
+ *
+ * By letting the layout tell it. Each pass renders from [start]; if the result still overflows, the
+ * first line's width is measured by the very engine that will draw it, and [start] advances past it.
+ * That converges in as many passes as there are surplus lines, and it is exact in a way arithmetic
+ * over character counts is not — it accounts for the font, the width, the system text scale, and
+ * where the words happen to break.
+ *
+ * [start] survives recomposition on purpose. A streaming answer grows by a token at a time, and the
+ * offset found for the previous token is still the right place to start looking for this one; it is
+ * reset only when the text stops being an extension of what was measured, which is a new turn.
+ *
+ * ```
+ * TailText(
+ *     text = streamingText(answer, streaming = true),
+ *     maxLines = 2,
+ *     style = MaterialTheme.typography.bodyMedium,
+ *     color = Color.White,
+ * )
+ * ```
+ */
+@Composable
+private fun TailText(
+    text: AnnotatedString,
+    maxLines: Int,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    // Keyed on the opening of the text rather than the whole of it: the opening is stable while an
+    // answer streams and changes the moment a different one starts, which is exactly when the window
+    // should be thrown away.
+    var start by remember(text.text.take(TAIL_KEY_CHARS)) { mutableIntStateOf(0) }
+    val from = start.coerceIn(0, text.length)
+
+    Text(
+        text = text.subSequence(from, text.length),
+        style = style,
+        color = color,
+        textAlign = TextAlign.Center,
+        maxLines = maxLines,
+        // No ellipsis. The end of this text is the live edge — the word being spoken — and marking
+        // it as truncated would say the opposite of what is true.
+        overflow = TextOverflow.Clip,
+        onTextLayout = { layout ->
+            if (layout.hasVisualOverflow && layout.lineCount >= maxLines) {
+                val firstLine = layout.getLineEnd(0, visibleEnd = true)
+                // Offsets from the layout are relative to what was handed to it, so they accumulate.
+                // The guard is against a zero-width advance looping forever on a line that cannot be
+                // broken any further.
+                if (firstLine > 0) start = (from + firstLine).coerceAtMost(text.length)
+            }
+        },
+        modifier = modifier,
+    )
 }
 
 /**
@@ -995,9 +1100,24 @@ private const val LIVE_QUESTION_MAX_CHARS = 160
 
 private const val LIVE_QUESTION_MAX_LINES = 3
 
-/** Over a face there is more room below the picture than beside an orb, and the ask was four. */
-private const val LIVE_QUESTION_MAX_LINES_AVATAR = 4
 private const val QUESTION_MAX_LINES = 2
+
+/**
+ * Lines of question and of answer kept on the stage, as captions.
+ *
+ * Two each. It is the most that fits over a face without the text becoming the subject, and it is
+ * what a listener needs: confirmation of what was heard, and the sentence currently being spoken.
+ * The rest of the turn is a tap away in text mode, whole and scrollable.
+ */
+private const val CAPTION_MAX_LINES = 2
+
+/**
+ * How much of a text's opening identifies it, for [TailText]'s window.
+ *
+ * Long enough that two different answers are unlikely to share it, short enough to stay unchanged
+ * while the rest of the answer streams in behind it.
+ */
+private const val TAIL_KEY_CHARS = 32
 
 /** The header's round buttons: smaller than the controls', because they sit beside a name. */
 private val HEADER_BUTTON = 42.dp
