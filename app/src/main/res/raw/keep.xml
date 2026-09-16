@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Keeps the agent stills that the resource shrinker cannot see are used.
+
+  `AgentPoster` resolves `res/drawable-nodpi/agent_<id>.webp` by name, through
+  `Resources.getIdentifier`, so that a persona the chat API adds tomorrow gets a poster by dropping
+  a file in. Nothing in the code names those drawables as constants, so R8's resource shrinker
+  concluded they were dead and removed all three from the release APK — verified with
+  `aapt2 dump resources`, which listed `customer_*` and no `agent_*` at all.
+
+  The symptom was release-only and looked like a loading bug rather than a build one: `getIdentifier`
+  returned 0, `AgentPoster` fell through to `AgentPortrait`, and the stage showed a breathing
+  monogram for the ~4.7 s the provider takes to send its first frame — exactly the wait the stills
+  exist to cover. Debug builds were fine, because nothing is shrunk there.
+
+  The wildcard keeps the by-name lookup honest: a new `agent_<id>.webp` is covered the moment it is
+  added, with no second place to remember to edit.
+-->
+<resources
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/agent_*" />
