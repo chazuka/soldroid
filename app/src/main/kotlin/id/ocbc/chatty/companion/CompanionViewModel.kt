@@ -50,7 +50,7 @@ import id.ocbc.chatty.core.ai.revealCaptions
  * actually appear — two identical strings are the same value, and a snackbar keyed on the text alone
  * would swallow the repeat.
  */
-data class Notice(val id: Long, @StringRes val message: Int)
+data class Notice(val id: Long, @param:StringRes val message: Int)
 
 /**
  * Everything the companion screen draws.
@@ -151,7 +151,7 @@ class CompanionViewModel @Inject constructor(
     private val sessions: AvatarSessionFactory,
     private val controller: AvatarController,
     private val signals: ConversationSignals,
-    @ApplicationScope private val applicationScope: CoroutineScope,
+    @param:ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(CompanionUiState())
@@ -496,12 +496,25 @@ class CompanionViewModel @Inject constructor(
     }
 
     /**
-     * Switches the conversation's language. Ignored mid-turn: the voice is resolved when a turn
-     * starts, so flipping it while the avatar is speaking would only confuse the next question.
+     * Points the conversation at the language the app is in.
+     *
+     * # Why this is set rather than toggled
+     *
+     * The switch used to live here, which made the conversation the authority on a decision the
+     * whole app answers to — the picker has no conversation to ask. It is hoisted now: the app owns
+     * the choice, and this is how the conversation hears about it.
+     *
+     * The traffic is one-way on purpose. [spokenLanguageFor] may still move the conversation's
+     * language when an answer comes back in the other one, because the voice and the number speller
+     * have to follow the words actually being spoken. That correction stays down here; one question
+     * asked in English is not a request to rewrite every button in the app.
+     *
+     * Ignored mid-turn, as the toggle was: the voice is resolved when a turn starts, so changing it
+     * while the avatar is speaking would only confuse the next question.
      */
-    fun toggleLanguage() {
+    fun setLanguage(language: Language) {
         if (!_state.value.acceptingInput) return
-        _state.update { it.copy(language = it.language.toggled()) }
+        _state.update { it.copy(language = language) }
     }
 
     /** Silences or restores the avatar's voice on this device, independent of language or turn state. */

@@ -16,7 +16,7 @@ import okhttp3.Request
  * [Brain.needsBriefing] is the test for whether it is worth calling.
  *
  * ```
- * val record = records.of("daniel")           // raw JSON, straight into the system prompt
+ * val record = records.of("alvin")           // raw JSON, straight into the system prompt
  * ```
  */
 interface CustomerRecords {

@@ -24,14 +24,16 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import dagger.hilt.android.AndroidEntryPoint
-import id.ocbc.chatty.agents.AgentListRoute
+import id.ocbc.chatty.customers.CustomerPickerRoute
 import id.ocbc.chatty.companion.CompanionRoute
 import id.ocbc.chatty.core.ai.Agent
 import id.ocbc.chatty.core.avatar.AvatarController
 import id.ocbc.chatty.core.ui.theme.ChattyTheme
 import javax.inject.Inject
 import id.ocbc.chatty.core.ai.Brain
+import id.ocbc.chatty.core.ai.Language
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
 
 /**
  * The app's one and only screen host.
@@ -82,44 +84,71 @@ class MainActivity : ComponentActivity() {
 /**
  * Two screens, and no navigation graph.
  *
- * Either an agent is chosen or it is not. A `NavHost` here would exist to hold a back stack one
- * entry deep, and `BackHandler` says the same thing in one line.
+ * Either a customer has been picked or they have not. A `NavHost` here would exist to hold a back
+ * stack one entry deep, and `BackHandler` says the same thing in one line.
  *
- * The [SharedTransitionLayout] around them is what lets the agent's monogram travel from its row in
- * the list to the middle of the stage, so the second screen reads as somewhere the first one led
- * rather than as a cut to an unrelated app.
+ * The screen is the customer picker rather than an agent list: picking a customer resolves the
+ * advisor who holds that customer's record — see [id.ocbc.chatty.customers.Customer] — so the two
+ * decisions the old list asked for are one tap.
+ *
+ * The [SharedTransitionLayout] around them is what lets the customer's portrait travel from its row
+ * in the list towards the middle of the stage, so the second screen reads as somewhere the first one
+ * led rather than as a cut to an unrelated app.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun ChattyApp() {
     var chosen by remember { mutableStateOf<Agent?>(null) }
 
-    // Which model answers. Chosen on the list beside the agent and held here rather than in the
+    // Which model answers. Chosen on the picker beside the customer and held here rather than in the
     // companion, so it survives leaving a conversation and starting another — picking a model is a
-    // decision about the session, not about one agent.
+    // decision about the session, not about one conversation.
     var brain by rememberSaveable { mutableStateOf(Brain.Default) }
 
-    SharedTransitionLayout {
-        AnimatedContent(
-            targetState = chosen,
-            transitionSpec = { fadeIn(tween(SCREEN_FADE_MS)) togetherWith fadeOut(tween(SCREEN_FADE_MS)) },
-            label = "screen",
-        ) { agent ->
-            CompositionLocalProvider(
-                LocalSharedTransitionScope provides this@SharedTransitionLayout,
-                LocalAnimatedVisibilityScope provides this@AnimatedContent,
-            ) {
-                if (agent == null) {
-                    AgentListRoute(
-                        brain = brain,
-                        onBrainChange = { brain = it },
-                        onSelect = { chosen = it },
-                    )
-                } else {
-                    // No BackHandler here. The companion needs to step out of a mode first, and to
-                    // close its billed provider session on the way out — a handler at this level
-                    // would skip both, which is exactly the bug it used to cause.
-                    CompanionRoute(agent = agent, brain = brain, onBack = { chosen = null })
+    // Which language the app is in — the words on screen and the language a conversation starts in.
+    //
+    // Held at the root for the same reason [brain] is, and for one more: it outlives every screen.
+    // The switch is on the picker, on the stage and in the thread, and all three are the same
+    // decision, so there is one value rather than one per screen. Seeded from the handset once; the
+    // switch owns it after that. See [ProvideAppLanguage] for why this is not the conversation's own
+    // language, which is allowed to follow the model's answer.
+    val context = LocalContext.current
+    var language by rememberSaveable { mutableStateOf(deviceLanguage(context)) }
+    val toggleLanguage = { language = language.toggled() }
+
+    ProvideAppLanguage(language) {
+        SharedTransitionLayout {
+            AnimatedContent(
+                targetState = chosen,
+                transitionSpec = {
+                    fadeIn(tween(SCREEN_FADE_MS)) togetherWith fadeOut(tween(SCREEN_FADE_MS))
+                },
+                label = "screen",
+            ) { agent ->
+                CompositionLocalProvider(
+                    LocalSharedTransitionScope provides this@SharedTransitionLayout,
+                    LocalAnimatedVisibilityScope provides this@AnimatedContent,
+                ) {
+                    if (agent == null) {
+                        CustomerPickerRoute(
+                            brain = brain,
+                            onBrainChange = { brain = it },
+                            language = language,
+                            onToggleLanguage = toggleLanguage,
+                            onSelect = { chosen = it },
+                        )
+                    } else {
+                        // No BackHandler here. The companion needs to step out of a mode first, and
+                        // to close its billed provider session on the way out — a handler at this
+                        // level would skip both, which is exactly the bug it used to cause.
+                        CompanionRoute(
+                            agent = agent,
+                            brain = brain,
+                            language = language,
+                            onToggleLanguage = toggleLanguage,
+                            onBack = { chosen = null },
+                        )
+                    }
                 }
             }
         }

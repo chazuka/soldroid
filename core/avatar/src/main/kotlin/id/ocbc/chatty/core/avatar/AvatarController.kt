@@ -86,11 +86,17 @@ interface AvatarController {
      * LiveKit owns the EGL context, so a renderer cannot initialise itself — calling `init()`
      * directly logs an error and draws nothing. Passing a drawer is how the chroma-key shader gets
      * in front of the frames; passing null keeps LiveKit's own default.
+     *
+     * [onFrameSize] reports the decoded frame's dimensions and the rotation to apply, the first time
+     * they are known and again whenever they change. It is the only place the stream says what shape
+     * it is; without it a caller has to assume, and an assumption about someone else's encoder is a
+     * thing that is right until the day it is not. Fires on the renderer thread.
      */
     fun initRenderer(
         renderer: TextureViewRenderer,
         drawer: RendererCommon.GlDrawer? = null,
         onFirstFrame: (() -> Unit)? = null,
+        onFrameSize: ((width: Int, height: Int, rotation: Int) -> Unit)? = null,
     )
 
     /** Join the room LiveAvatar published into. Safe to call again with a fresh stream. */
@@ -231,6 +237,7 @@ class LiveKitAvatarController(
         renderer: TextureViewRenderer,
         drawer: RendererCommon.GlDrawer?,
         onFirstFrame: (() -> Unit)?,
+        onFrameSize: ((width: Int, height: Int, rotation: Int) -> Unit)?,
     ) {
         if (drawer == null) {
             room.initVideoRenderer(renderer)
@@ -239,10 +246,17 @@ class LiveKitAvatarController(
         // The same thing `initVideoRenderer` does, with our shader substituted for the stock one and
         // a first-frame callback so the caller can hold a placeholder until there is really a
         // picture — a TextureView is opaque black until then, and swapping to it early shows that.
-        val events = onFirstFrame?.let {
+        val events = if (onFirstFrame == null && onFrameSize == null) {
+            null
+        } else {
             object : RendererCommon.RendererEvents {
-                override fun onFirstFrameRendered() = it()
-                override fun onFrameResolutionChanged(width: Int, height: Int, rotation: Int) = Unit
+                override fun onFirstFrameRendered() {
+                    onFirstFrame?.invoke()
+                }
+
+                override fun onFrameResolutionChanged(width: Int, height: Int, rotation: Int) {
+                    onFrameSize?.invoke(width, height, rotation)
+                }
             }
         }
         renderer.init(room.lkObjects.eglBase.eglBaseContext, events, EglBase.CONFIG_PLAIN, drawer)

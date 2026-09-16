@@ -35,7 +35,12 @@ data class AgentsUiState(
 )
 
 /**
- * Loads the agent list once on creation and exposes it as [state] for [AgentListRoute].
+ * Loads the agent list once on creation and exposes it as [state] for the customer picker.
+ *
+ * The picker shows customers, not agents, and draws them from a bundled catalogue — see
+ * [id.ocbc.chatty.customers.Customers]. What it needs from here is the *join*: every customer names
+ * an agent id, and only the API knows which of those ids exist in this deployment. So this stays an
+ * agent list, and the screen matches its own rows against it.
  *
  * There is no per-agent state here — just the list — so this view model is only ever alive while the
  * first screen is on screen.

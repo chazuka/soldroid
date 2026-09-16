@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -54,6 +55,32 @@ class AvatarRenderTarget internal constructor(internal val renderer: TextureView
      * replaced, because that wait starts again.
      */
     internal var hasFrame by mutableStateOf(false)
+
+    /**
+     * The shape of the stream, as the stream reports it — width over height, rotation applied.
+     *
+     * Null until the first frame's dimensions arrive, which is the caller's cue to draw at whatever
+     * ratio it assumes in the meantime. It is deliberately not seeded with a guess: a null that means
+     * "not known yet" is honest, where a default would be an assumption wearing a measurement's
+     * clothes.
+     *
+     * # Why the shape has to come from here
+     *
+     * The frame is the provider's to choose, and it is the number a caller needs to size a card
+     * without letterboxing it. Hard-coding it works right up until the provider re-encodes, at which
+     * point nothing fails — the picture just quietly sits in the wrong-shaped box with bars nobody
+     * asked for. Reading it makes that self-correcting.
+     *
+     * ```
+     * val aspect = face.frameAspect ?: FALLBACK_ASPECT
+     * Box(Modifier.size(height * aspect, height)) { AvatarSurface(face, …) }
+     * ```
+     *
+     * Written from the renderer thread, like [hasFrame]. Reset when the track is replaced, because
+     * the next one may be shaped differently.
+     */
+    var frameAspect: Float? by mutableStateOf(null)
+        internal set
 }
 
 /**
@@ -62,9 +89,19 @@ class AvatarRenderTarget internal constructor(internal val renderer: TextureView
  *
  * [background] is the colour the chroma key composites onto, and should match whatever the face will
  * be drawn against.
+ *
+ * [crop] picks how the stream meets its frame. The default fits it: the whole picture, with any
+ * letterbox invisible because the bars are the colour the shader just painted behind the subject.
+ * Pass true only when the frame has deliberately been made a different shape from the stream and the
+ * caller wants the picture to fill it — libwebrtc centres that crop, so it takes from the top and
+ * the bottom of the frame equally.
  */
 @Composable
-fun rememberAvatarRenderTarget(controller: AvatarController, background: Color): AvatarRenderTarget {
+fun rememberAvatarRenderTarget(
+    controller: AvatarController,
+    background: Color,
+    crop: Boolean = false,
+): AvatarRenderTarget {
     val context = LocalContext.current
     val target = remember { AvatarRenderTarget(TextureViewRenderer(context)) }
     val backgroundArgb = background.toArgb()
@@ -80,9 +117,31 @@ fun rememberAvatarRenderTarget(controller: AvatarController, background: Color):
                 Log.i(TAG, "first frame ${System.currentTimeMillis() - readyAtMs}ms after the sink opened")
                 target.hasFrame = true
             },
+            onFrameSize = { width, height, rotation ->
+                // A quarter turn swaps what the decoder reports for what is actually drawn.
+                val upright = rotation % HALF_TURN_DEGREES != 0
+                val shown = if (upright) height to width else width to height
+                val aspect = if (shown.second > 0) shown.first.toFloat() / shown.second else null
+                if (aspect != null && aspect != target.frameAspect) {
+                    Log.i(TAG, "stream is ${shown.first}x${shown.second} (aspect %.3f)".format(aspect))
+                    target.frameAspect = aspect
+                }
+            },
         )
-        target.renderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         onDispose { target.renderer.release() }
+    }
+
+    // Its own effect, not part of the init above: [crop] changes when the frame the caller draws
+    // changes shape — a rotation does exactly that — and re-running `initRenderer` for a scaling
+    // mode would tear down a working renderer to change one enum.
+    LaunchedEffect(target, crop) {
+        target.renderer.setScalingType(
+            if (crop) {
+                RendererCommon.ScalingType.SCALE_ASPECT_FILL
+            } else {
+                RendererCommon.ScalingType.SCALE_ASPECT_FIT
+            },
+        )
     }
 
     val track by controller.videoTrack.collectAsState()
@@ -95,6 +154,8 @@ fun rememberAvatarRenderTarget(controller: AvatarController, background: Color):
         onDispose {
             live?.removeRenderer(target.renderer)
             target.hasFrame = false
+            // The next track reports its own shape; until it does, nothing is known about it.
+            target.frameAspect = null
         }
     }
 
@@ -110,9 +171,11 @@ fun rememberAvatarRenderTarget(controller: AvatarController, background: Color):
  * fragment shader and composites onto [background] — pass the same colour the surrounding stage is
  * painted, and the face reads as standing on the app's own ground rather than in a green box.
  *
- * Scaling is aspect-**fit**, not fill. Filling would crop a portrait frame to the view's shape and
- * take the top of the head with it; fitting shows the whole frame and lets the letterbox disappear,
- * because the bars are the same colour the shader just painted behind the subject.
+ * Scaling is aspect-**fit** by default, not fill. Filling crops a portrait frame to the view's shape
+ * and takes some of the top of the head with it; fitting shows the whole frame and lets the
+ * letterbox disappear, because the bars are the same colour the shader just painted behind the
+ * subject. The choice belongs to whoever sized the frame — see `rememberAvatarRenderTarget`'s
+ * `crop`.
  *
  * The renderer is a `TextureView`, which matters when the caller rounds this into a circle: a
  * `SurfaceView` is a separate window and ignores Compose's `clip`, so the corners would stay square.
@@ -146,3 +209,6 @@ fun AvatarSurface(
 }
 
 private const val TAG = "chatty.avatar"
+
+/** A half turn. Rotation past it in either direction swaps the frame's width and height. */
+private const val HALF_TURN_DEGREES = 180

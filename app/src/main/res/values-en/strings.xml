@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The English copy, for a handset set to English.
+
+  Indonesian is the default in `values/` because these customers and their accounts are Indonesian,
+  and a handset set to anything else falls back to it. This file is the one exception the platform
+  picks up on its own — no code chooses it, and nothing here is about the *conversation* language,
+  which the customer switches inside a conversation and which follows the words they use.
+
+  The personas' own names are deliberately absent: Rendra is Rendra in both languages, so the picker
+  carries them in code rather than keeping a second copy here that could drift.
+-->
+<resources>
+    <string name="agents_retry">Try again</string>
+
+    <string name="customers_badge">Financial Coach</string>
+    <string name="customers_title">Choose the persona that fits you best</string>
+    <string name="customers_subtitle">Every customer has their own character, needs, and financial goals.</string>
+
+    <string name="customer_rendra_description">A young professional aiming for financial independence through strategic planning and disciplined investing.</string>
+    <string name="customer_rendra_trait_1">Data-driven</string>
+    <string name="customer_rendra_trait_2">Strategic</string>
+    <string name="customer_rendra_trait_3">Independent</string>
+
+    <string name="customer_alya_description">A teenager taking her first steps in banking, learning to manage money for a brighter future.</string>
+    <string name="customer_alya_trait_1">Friendly</string>
+    <string name="customer_alya_trait_2">Supportive</string>
+    <string name="customer_alya_trait_3">Easy to talk to</string>
+
+    <string name="customer_michael_description">A family-focused individual who wants to balance today\'s financial needs with tomorrow\'s goals.</string>
+    <string name="customer_michael_trait_1">Calm</string>
+    <string name="customer_michael_trait_2">Practical</string>
+    <string name="customer_michael_trait_3">Family-focused</string>
+
+    <string name="companion_mode_voice">Voice mode</string>
+    <string name="companion_mode_avatar">Avatar mode</string>
+    <string name="companion_stop">End</string>
+    <string name="companion_stop_hint">End the conversation</string>
+    <string name="companion_video_on">Turn video on</string>
+    <string name="companion_video_off">Turn video off</string>
+    <string name="companion_mode_text">Text mode</string>
+    <string name="companion_show_face">Show the face</string>
+    <string name="companion_today">Today</string>
+    <string name="companion_language">Switch language</string>
+    <string name="starter_balance">Check my balance</string>
+    <string name="starter_spending">This month\'s spending</string>
+    <string name="starter_goals">Financial goals</string>
+    <string name="starter_portfolio">My portfolio</string>
+    <string name="companion_back">Back</string>
+    <string name="companion_compose_hint_named">Message %1$s…</string>
+    <string name="companion_compose_hint">Type a question…</string>
+    <string name="companion_send">Send</string>
+    <string name="companion_hold_to_talk">Hold to talk</string>
+    <string name="companion_mute">Mute the voice</string>
+    <string name="companion_unmute">Unmute the voice</string>
+    <string name="companion_handsfree_on">Turn handsfree on</string>
+    <string name="companion_handsfree_off">Turn handsfree off</string>
+    <string name="conversation_channel">Conversation running</string>
+    <string name="conversation_ongoing">Talking with %1$s</string>
+    <string name="conversation_end">End</string>
+    <string name="conversation_ongoing_detail">The microphone and the voice stay on even when the screen is off.</string>
+    <string name="companion_mic_tap_hint">Hold the button to talk, or double tap it for handsfree.</string>
+    <string name="companion_mic_hint_hold">Hold to talk · double tap for handsfree</string>
+    <string name="companion_mic_hint_handsfree">Handsfree on · double tap to stop</string>
+    <string name="companion_handsfree_send">Send now</string>
+    <string name="handsfree_timed_out">Handsfree switched off — nothing was heard.</string>
+
+    <string name="phase_idle">Ready</string>
+    <string name="phase_listening">Listening</string>
+    <string name="phase_thinking">Thinking</string>
+    <string name="phase_speaking">Answering</string>
+
+    <string name="mic_permission_needed">Allow the microphone, then hold the button once more.</string>
+    <string name="mic_denied">The microphone is not allowed. Type instead, or allow it in Settings.</string>
+    <string name="mic_unavailable">This device has no speech recogniser. Type instead.</string>
+    <string name="mic_no_network">Voice needs a connection. Check the network, then try again.</string>
+    <string name="mic_no_match">Not caught. Try again.</string>
+    <string name="turn_retry">Try again</string>
+    <string name="turn_failed_inline">The answer did not arrive.</string>
+    <string name="answer_failed">The answer did not arrive. Try asking again.</string>
+    <string name="avatar_unavailable">The face is unavailable; the conversation continues in text.</string>
+</resources>

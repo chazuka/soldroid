@@ -1,10 +1,12 @@
 package id.ocbc.chatty.companion
 
+import android.content.ClipData
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -28,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,20 +38,20 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import id.ocbc.chatty.R
@@ -61,6 +64,7 @@ import id.ocbc.chatty.core.ui.theme.CustomerBubbleShape
 import id.ocbc.chatty.core.ui.theme.Spacing
 import id.ocbc.chatty.core.ui.theme.StageColors
 import id.ocbc.chatty.core.ui.theme.rememberReducedMotion
+import kotlinx.coroutines.launch
 
 /**
  * The pieces the three companion modes share.
@@ -192,6 +196,22 @@ fun MicButton(
         // listening have to look different or there is no way to tell whether it caught you, and the
         // ring grows past the button — over the answer above it — which is a price worth paying for
         // live feedback and not for a mode that the caption already states.
+        // The canvas's resting glow: two soft rings of the brand red, which is what stops a solid
+        // red disc reading as a flat sticker on the slate.
+        Box(
+            Modifier
+                .size(size * MIC_GLOW_OUTER_SCALE)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = MIC_GLOW_OUTER_ALPHA)),
+        )
+        Box(
+            Modifier
+                .size(size * MIC_GLOW_INNER_SCALE)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = MIC_GLOW_INNER_ALPHA)),
+        )
+        // The breathing ring means "hearing you right now", never "handsfree is on". Armed and
+        // listening have to look different or there is no way to tell whether it caught you.
         if (listening) {
             Box(
                 Modifier
@@ -200,6 +220,15 @@ fun MicButton(
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = MIC_HALO_ALPHA)),
             )
+        } else if (lit) {
+            // Armed but between questions: a steady ring, so handsfree is visible on the button and
+            // not only in the caption under it.
+            Box(
+                Modifier
+                    .size(size * MIC_ARMED_RING_SCALE)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = MIC_ARMED_RING_ALPHA)),
+            )
         }
         // A Surface, not a Box carrying `Modifier.background`. The Box form drew its icon but
         // silently skipped its fill on device, so the button vanished against the avatar. A Surface
@@ -207,8 +236,10 @@ fun MicButton(
         // fix and what every other control on this screen already does.
         Surface(
             shape = CircleShape,
-            color = if (lit) MaterialTheme.colorScheme.primary else Color.White,
-            contentColor = if (lit) MaterialTheme.colorScheme.onPrimary else MIC_IDLE_ICON,
+            // Red at rest, as both canvases draw it. It used to be white until it lit up, which made
+            // the one control the screen is built around the only one that looked switched off.
+            color = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             modifier = Modifier
                 .size(size)
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
@@ -275,8 +306,11 @@ fun Bubble(
     // Long-press copies. An agent's answer is the sort of thing a customer wants to paste into a
     // note or a message to their partner, and on a phone the only gesture anyone tries for that is
     // a long press. The haptic is the receipt — a toast here would cover the text they just took.
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val haptics = LocalHapticFeedback.current
+    // The clipboard hands the text to the system rather than writing it, so the call suspends and
+    // the long press needs a scope to hand it off from.
+    val scope = rememberCoroutineScope()
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = if (fromCustomer) Arrangement.End else Arrangement.Start,
@@ -290,7 +324,11 @@ fun Bubble(
                     detectTapGestures(
                         onLongPress = {
                             if (text.isNotBlank()) {
-                                clipboard.setText(AnnotatedString(text))
+                                scope.launch {
+                                    clipboard.setClipEntry(
+                                        ClipEntry(ClipData.newPlainText(CLIP_LABEL, text)),
+                                    )
+                                }
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                         },
@@ -319,8 +357,11 @@ fun Bubble(
 /**
  * A circular control over the avatar: the design's 56dp glass disc with a hairline.
  *
- * Used for everything in voice mode that is not the microphone — keyboard, close — so the three sit
- * as a set and the microphone's solid fill reads as the primary one among them.
+ * Used for everything on the stage that is not the microphone — keyboard, stop, camera, mute — so
+ * they sit as a set and the microphone's solid fill reads as the primary one among them.
+ *
+ * [size] is the canvas's two: the 54dp discs either side of the microphone, and the smaller 42dp
+ * pair in the header, where they sit beside a name rather than under a label.
  */
 @Composable
 fun GlassCircleButton(
@@ -328,6 +369,7 @@ fun GlassCircleButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    size: Dp = GLASS_BUTTON_SIZE,
 ) {
     Surface(
         onClick = onClick,
@@ -335,10 +377,14 @@ fun GlassCircleButton(
         color = Color.White.copy(alpha = GLASS_FILL_ALPHA),
         contentColor = Color.White,
         border = BorderStroke(1.dp, Color.White.copy(alpha = GLASS_STROKE_ALPHA)),
-        modifier = modifier.size(GLASS_BUTTON_SIZE),
+        modifier = modifier.size(size),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(imageVector = icon, contentDescription = contentDescription)
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(size * GLASS_ICON_RATIO),
+            )
         }
     }
 }
@@ -366,9 +412,10 @@ fun TranscriptEntry.fromCustomer(): Boolean = speaker == Speaker.CUSTOMER
  */
 @Composable
 fun AgentPoster(agentId: String, displayName: String, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val posterId = remember(agentId) {
-        context.resources.getIdentifier("agent_$agentId", "drawable", context.packageName)
+    val resources = LocalResources.current
+    val packageName = LocalContext.current.packageName
+    val posterId = remember(agentId, resources) {
+        resources.getIdentifier("agent_$agentId", "drawable", packageName)
     }
 
     if (posterId == 0) {
@@ -429,7 +476,20 @@ private const val DISABLED_ALPHA = 0.4f
 private const val GLASS_FILL_ALPHA = 0.12f
 private const val GLASS_STROKE_ALPHA = 0.20f
 private const val GLASS_BUBBLE_ALPHA = 0.55f
-private val GLASS_BUTTON_SIZE = 56.dp
+/** The canvas's two resting halos around the microphone, as a share of the button itself. */
+private const val MIC_GLOW_INNER_SCALE = 1.32f
+private const val MIC_GLOW_OUTER_SCALE = 1.70f
+private const val MIC_GLOW_INNER_ALPHA = 0.14f
+private const val MIC_GLOW_OUTER_ALPHA = 0.06f
+
+/** Handsfree, between questions: steady where listening breathes. */
+private const val MIC_ARMED_RING_SCALE = 1.16f
+private const val MIC_ARMED_RING_ALPHA = 0.35f
+
+private val GLASS_BUTTON_SIZE = 54.dp
+
+/** The glyph's share of the disc, so a 42dp header button and a 54dp control look like one family. */
+private const val GLASS_ICON_RATIO = 0.42f
 private val DOT_SIZE = 7.dp
 private const val DOT_PULSE_SCALE = 1.45f
 private const val DOT_PULSE_MS = 700
@@ -448,3 +508,6 @@ val MIC_SIZE_COMPACT: Dp = 48.dp
 
 /** Voice mode's microphone: the primary control on the screen, sized to be pressed without looking. */
 val MIC_SIZE_PROMINENT: Dp = 88.dp
+
+/** What the system shows the copied text as when it lists what is on the clipboard. */
+private const val CLIP_LABEL = "message"

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -57,15 +58,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import id.ocbc.chatty.LanguagePill
 import id.ocbc.chatty.R
 import id.ocbc.chatty.core.ai.Agent
+import id.ocbc.chatty.core.ai.Language
 import id.ocbc.chatty.core.ai.TranscriptEntry
 import id.ocbc.chatty.core.ai.TurnPhase
 import id.ocbc.chatty.core.ui.theme.Spacing
+import id.ocbc.chatty.core.ui.theme.onSurfaceSecondary
 import kotlinx.coroutines.delay
 import id.ocbc.chatty.core.avatar.rememberAvatarRenderTarget
 import id.ocbc.chatty.core.ai.Brain
 import androidx.compose.ui.platform.LocalView
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import android.Manifest
 import android.content.pm.PackageManager
@@ -100,6 +106,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 fun CompanionRoute(
     agent: Agent,
     brain: Brain,
+    language: Language,
+    onToggleLanguage: () -> Unit,
     onBack: () -> Unit,
     viewModel: CompanionViewModel = hiltViewModel(),
     signals: ConversationSignals = hiltViewModel<ConversationSignalsHolder>().signals,
@@ -109,6 +117,11 @@ fun CompanionRoute(
 
     // Keyed on the id so a configuration change does not tear down and re-open a billed session.
     LaunchedEffect(agent.id, brain) { viewModel.open(agent, brain) }
+
+    // The switch is the app's, so the conversation is told about it rather than owning it. The
+    // conversation may still move its own language from here — an answer that comes back in the
+    // other language takes the voice and the speller with it — and that never travels back up.
+    LaunchedEffect(language) { viewModel.setLanguage(language) }
 
     // Text mode is meant to be read. An answer arriving out loud over a thread is startling, and on
     // a phone in public it is worse than startling — so playout is suppressed for as long as the
@@ -154,9 +167,12 @@ fun CompanionRoute(
     }
 
     val agentName = state.agent?.displayName.orEmpty()
-    DisposableEffect(context, agentName, mayRunInBackground) {
+    // Keyed on the language too: the notification is built once from whatever it is told, so a
+    // customer who switches language mid-conversation would otherwise be left with a lock screen
+    // still written in the one they just left.
+    DisposableEffect(context, agentName, mayRunInBackground, language) {
         if (mayRunInBackground && agentName.isNotEmpty()) {
-            ConversationService.start(context, agentName)
+            ConversationService.start(context, agentName, language)
         }
         onDispose { ConversationService.stop(context) }
     }
@@ -207,7 +223,7 @@ fun CompanionRoute(
         onToggleHandsfree = viewModel::toggleHandsfree,
         onHandsfreeTimedOut = viewModel::handsfreeTimedOut,
         onMicHint = viewModel::micNeedsAHold,
-        onToggleLanguage = viewModel::toggleLanguage,
+        onToggleLanguage = onToggleLanguage,
         onToggleTrace = viewModel::toggleTrace,
         onNoticeShown = viewModel::onNoticeShown,
         onBack = leave,
@@ -249,7 +265,22 @@ private fun CompanionScreen(
     //
     // Black, to match the bundled stills exactly: the card reads as a framed portrait on the slate
     // gradient, and the still-to-live swap has no background change to give it away.
-    val face = rememberAvatarRenderTarget(controller = controller, background = Color.Black)
+    // Portrait draws the avatar edge to edge — canvas 14B — so the picture fills its frame and the
+    // crop is the point rather than a compromise: on a handset taller than the stream it takes the
+    // sides, not the head.
+    //
+    // Landscape is the other way round and filling there is a bug, not a trade. The picture area
+    // turns wide and short, and a 9:16 stream filling it is cropped to a neck and a collar — the
+    // face, which is the whole reason this mode exists, ends up above the frame. Measured on a
+    // rotated handset, not reasoned about. So landscape fits instead and lets the slate show at the
+    // sides, which is the same bargain [AvatarSurface] documents: a letterbox nobody sees beats a
+    // crop everybody does.
+    val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+    val face = rememberAvatarRenderTarget(
+        controller = controller,
+        background = Color.Black,
+        crop = portrait,
+    )
 
     // Used to tell "I heard nothing" apart from "there is no network" — see the recogniser's
     // onProblem below.
@@ -472,7 +503,9 @@ private fun CompanionScreen(
                     onToggleLanguage = onToggleLanguage,
                     onMicTap = onMicTap,
                     onToggleTrace = onToggleTrace,
-                    onBack = onBack,
+                    // Stop ends the conversation, which is what leaving this screen has always
+                    // meant: close the billed provider session, then go back.
+                    onStop = onBack,
                 )
             } else {
                 TextMode(
@@ -525,7 +558,13 @@ private fun TextMode(
             )
 
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier
+                    .weight(1f)
+                    // `widthIn` first: `fillMaxWidth` hands the child a fixed width, and a cap
+                    // applied after that has nothing left to cap.
+                    .widthIn(max = THREAD_MAX_WIDTH)
+                    .fillMaxWidth()
+                    .align(Alignment.CenterHorizontally),
                 state = listState,
                 contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.lg),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
@@ -534,7 +573,7 @@ private fun TextMode(
                     Text(
                         text = stringResource(R.string.companion_today),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceSecondary,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -592,7 +631,7 @@ private fun RetryRow(enabled: Boolean, onRetry: () -> Unit) {
         Text(
             text = stringResource(R.string.turn_failed_inline),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceSecondary,
         )
         Surface(
             onClick = onRetry,
@@ -625,7 +664,9 @@ private fun ThreadHeader(
         Column {
             Row(
                 modifier = Modifier
+                    .widthIn(max = THREAD_MAX_WIDTH)
                     .fillMaxWidth()
+                    .align(Alignment.CenterHorizontally)
                     .statusBarsPadding()
                     .padding(horizontal = Spacing.lg, vertical = Spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
@@ -654,26 +695,19 @@ private fun ThreadHeader(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
+                    // The mode, not the security posture. Every surface's header now reads
+                    // "<agent> / <where you are>" — avatar mode, voice mode, text mode — so the
+                    // line means the same thing wherever the customer happens to be standing.
                     Text(
-                        text = stringResource(R.string.companion_secure_session),
+                        text = stringResource(R.string.companion_mode_text),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceSecondary,
                     )
                 }
-                Surface(
-                    onClick = onToggleLanguage,
+                LanguagePill(
+                    onToggle = onToggleLanguage,
                     enabled = state.acceptingInput,
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                ) {
-                    Text(
-                        text = state.language.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                    )
-                }
+                )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -741,7 +775,9 @@ private fun Composer(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(
                 modifier = Modifier
+                    .widthIn(max = THREAD_MAX_WIDTH)
                     .fillMaxWidth()
+                    .align(Alignment.CenterHorizontally)
                     .navigationBarsPadding()
                     .imePadding()
                     .padding(horizontal = Spacing.lg, vertical = Spacing.md),
@@ -832,3 +868,14 @@ private const val HANDSFREE_MAX_LISTEN_MS = 15_000L
 
 /** Handsfree's own log tag: this loop is invisible on screen and impossible to debug without it. */
 private const val HANDSFREE_TAG = "chatty.handsfree"
+
+/**
+ * How wide the thread is allowed to get.
+ *
+ * A conversation is reading, and reading has a comfortable measure — roughly 60 to 75 characters a
+ * line. Left to fill the screen the thread was fine held upright and wrong turned sideways: on a
+ * 2856px handset the starter chips stretched into bars, an answer ran the full width of the glass,
+ * and the send button ended up a hand's width from the text it sends. Capped and centred, the
+ * sideways screen simply gets margins.
+ */
+private val THREAD_MAX_WIDTH = 640.dp

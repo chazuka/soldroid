@@ -18,8 +18,24 @@ internal object Palette {
     val RedPressed = Color(0xFFC61A11)
     val RedDeep = Color(0xFFA9130B)
 
-    /** The orb/​glow highlight the design uses at the top-left of the red sphere. */
+    /**
+     * The orb/​glow highlight the design uses at the top-left of the red sphere.
+     *
+     * Also the brand red's dark-mode reading voice — see [accentOnSurface]. [Red] itself only
+     * reaches 2.8:1 against the dark slates, which is unreadable; this clears AA on all of them.
+     */
     val RedLight = Color(0xFFFF6A5E)
+
+    /**
+     * The tinted pill behind accent text in light mode: [Red] at 8% over white, resolved to an
+     * opaque colour.
+     *
+     * Opaque on purpose. As an alpha wash its contrast depended on whatever it happened to be laid
+     * over, and the same chip measured 4.2:1 on a card and 3.8:1 on the canvas — both short of AA,
+     * neither obviously so. A fixed colour makes the pair with [RedPressed] a number that can be
+     * asserted once.
+     */
+    val RedWash = Color(0xFFFDEEED)
 
     // Light surfaces: the thread's paper, and the white the cards sit on.
     val Canvas = Color(0xFFF4F6F7)

@@ -1,5 +1,6 @@
 package id.ocbc.chatty.companion
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -10,29 +11,35 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,20 +47,28 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import id.ocbc.chatty.LanguagePill
 import id.ocbc.chatty.R
 import id.ocbc.chatty.core.avatar.AvatarRenderTarget
 import id.ocbc.chatty.core.avatar.AvatarSurface
@@ -66,6 +81,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawWithContent
@@ -73,7 +89,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.Role
 
@@ -112,137 +127,313 @@ fun VoiceStage(
     onToggleLanguage: () -> Unit,
     onMicTap: () -> Unit,
     onToggleTrace: () -> Unit,
-    onBack: () -> Unit,
+    /** Ends the conversation. The redesigned header has no back arrow; Stop is the way out. */
+    onStop: () -> Unit,
 ) {
     // Keyed on Unit: `interruptible` flips on every turn, and a gesture detector that restarts
     // mid-stream can fire a tap nobody made.
     val canInterrupt = rememberUpdatedState(state.interruptible)
 
+    // The stage is dark whatever the rest of the app is, so the system's own clock and icons have to
+    // be light while it is on screen. They follow the app's theme otherwise, and in a light theme
+    // that puts a dark clock on a black avatar: on a handset held sideways, where the picture runs
+    // under the status bar, the time was unreadable against the subject's hair. Put back on the way
+    // out so the screens that *are* light keep their dark icons.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.context as? Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val wasLight = controller?.isAppearanceLightStatusBars
+        controller?.isAppearanceLightStatusBars = false
+        controller?.isAppearanceLightNavigationBars = false
+        onDispose {
+            if (wasLight != null) {
+                controller.isAppearanceLightStatusBars = wasLight
+                controller.isAppearanceLightNavigationBars = wasLight
+            }
+        }
+    }
+
+    // Canvas 14 and 14B are one screen with the picture switched off. The pieces are identical —
+    // header, what the agent is doing, what was said, three controls — and only their ground
+    // changes: a flat slate in voice mode, the face itself in avatar mode.
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(StageColors.voiceGradient))
-            // Tapping the stage cuts an answer short. Barge-in is something you do *to a speaker*; a
-            // dedicated stop button would sit there implying the answer is something to escape.
+            .background(StageColors.base)
+            // Tapping the stage cuts an answer short. Barge-in is something you do *to a speaker*,
+            // and it stays a tap rather than a button because the button of that name now ends the
+            // conversation.
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { if (canInterrupt.value) onInterrupt() })
-            }
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(horizontal = Spacing.xl)
-            .padding(top = Spacing.md, bottom = STAGE_BOTTOM_PADDING),
+            },
     ) {
-        StageHeader(
-            state = state,
-            listening = listening,
-            onBack = onBack,
-            onToggleMute = onToggleMute,
-            onToggleLanguage = onToggleLanguage,
-            onToggleTrace = onToggleTrace,
-        )
-
-        // The stage is a fixed budget of height, and the face is the part that gives.
-        //
-        // It used to be the other way round: the portrait was a fixed 352dp and whatever was left
-        // went to the words. On a handset that left about 90dp for a question and a four-sentence
-        // answer, and a Column does not clip — so the answer was drawn straight over the controls at
-        // the foot of the screen, half a line of it visible under the microphone. Reserving the
-        // text's space first and sizing the face from what remains cannot produce that, at any font
-        // scale or screen height.
-        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            // Landscape is not portrait with less height. Stacking the face above the words needs
-            // about 520dp; a handset on its side has roughly 300, and the budget below then hits its
-            // floor and overflows — the controls end up drawn across the bottom of the portrait.
-            // Turned sideways there is width to spare instead, so the same two things go side by
-            // side and each gets the full height.
-            // Captured before the Row and Column scopes below shadow the constraints receiver.
-            val available = maxHeight
-            val sideBySide = maxWidth > available
-            val bars = @Composable { LevelBars(active = listening || state.phase == TurnPhase.SPEAKING) }
-            val words = @Composable { modifier: Modifier ->
+        // A screen on its side has height to spare nowhere. Everything below measures itself
+        // against this rather than against an orientation flag, so a tall-but-short window — a
+        // freeform one, a foldable half-open — gets the same treatment.
+        val compact = LocalConfiguration.current.screenHeightDp < COMPACT_HEIGHT_DP
+        val live = listening || state.phase == TurnPhase.SPEAKING
+        val words = @Composable { modifier: Modifier ->
+            Column(
+                modifier = modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(
+                    if (mode == CompanionMode.VIDEO) Spacing.md else Spacing.xl,
+                ),
+            ) {
+                StateBadge(phase = state.phase, listening = listening)
+                LevelBars(
+                    active = live,
+                    bars = if (mode == CompanionMode.VIDEO) BARS_COMPACT else BARS_FULL,
+                    height = if (mode == CompanionMode.VIDEO) BAR_MAX_COMPACT else BAR_MAX,
+                )
                 Exchange(
                     state = state,
+                    mode = mode,
                     listening = listening,
                     partial = partial,
                     onRetry = onRetry,
-                    modifier = modifier,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+        }
+        val header = @Composable {
+            StageHeader(
+                state = state,
+                mode = mode,
+                onToggleVideo = onToggleVideo,
+                onToggleMute = onToggleMute,
+                onToggleLanguage = onToggleLanguage,
+                onToggleTrace = onToggleTrace,
+            )
+        }
+
+        if (mode == CompanionMode.VIDEO) {
+            val picture = @Composable { modifier: Modifier ->
+                BoxWithConstraints(modifier.then(Modifier.clipToBounds())) {
+                    // Edge to edge while the frame is taller than it is wide, which is canvas 14B
+                    // and every handset held upright: the stream is cropped at the sides and the
+                    // face fills the screen.
+                    //
+                    // Turned sideways that same fill is a bug rather than a trade. The picture area
+                    // becomes wide and short, and a 9:16 stream filling it is cropped to a collar —
+                    // the face ends up above the frame entirely. Measured on a rotated handset, not
+                    // reasoned about. So on a short screen the surface is given the stream's own
+                    // shape and centred, which letterboxes it rather than beheading it.
+                    val streamShape = face.frameAspect ?: FALLBACK_ASPECT
+                    AvatarSurface(
+                        target = face,
+                        background = StageColors.base,
+                        modifier = if (compact) {
+                            // Sideways the surface keeps the stream's own shape and takes the full
+                            // height of its half — edge to edge top and bottom, and pinned to the
+                            // screen's own edge rather than centred in the half, so the subject sits
+                            // against the side of the screen and the slack falls between the face
+                            // and the controls instead of splitting either side of it.
+                            //
+                            // # Why the frame is not made to fill the half
+                            //
+                            // Because nothing this side of the renderer can choose where the crop
+                            // falls. Handed a box wider than the stream it centres its own crop, and
+                            // measured on a rotated handset that takes the crown off the top: a
+                            // taller surface does not move it, and neither does sliding the drawn
+                            // result down — the head is simply not inside what was drawn. Matching
+                            // the stream's shape is the one framing where crop and fit agree, so the
+                            // head arrives whole. The bands either side are the colour the chroma key
+                            // already paints behind the subject, so they are not visible as bands.
+                            Modifier.align(Alignment.CenterStart).fillMaxHeight().aspectRatio(streamShape)
+                        } else run {
+                            // Full width at the stream's own shape, in both orientations.
+                            // `requiredHeight` because the result is taller than the box and is
+                            // meant to be — the parent clips it. Anchored to the top and then
+                            // dropped a touch; see [AVATAR_DROP_MAX].
+                            //
+                            // Sideways the box is half the screen, which is wider than the stream,
+                            // so the same rule crops instead of letterboxing: about half the frame's
+                            // height survives, and since the chin sits near the frame's top third
+                            // what leaves the screen is chest. Letterboxed to the stream's shape
+                            // instead, the face came out a 590px sliver on a 2856px screen.
+                            val rendered = maxWidth / streamShape
+                            val drop = ((rendered - maxHeight) / 2).coerceIn(0.dp, AVATAR_DROP_MAX)
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .fillMaxWidth()
+                                .requiredHeight(rendered)
+                                .offset(y = drop)
+                        },
+                        idle = {
+                            state.agent?.let {
+                                AgentPoster(agentId = it.id, displayName = it.displayName)
+                            }
+                        },
+                    )
+                    // The foot of the picture carries a sentence and needs to be dark enough to
+                    // read it. The top only has a seam to soften where the video meets the slate.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to StageColors.base.copy(alpha = SCRIM_SEAM),
+                                    SCRIM_CLEAR_FROM to Color.Transparent,
+                                    SCRIM_CLEAR_TO to Color.Transparent,
+                                    1f to StageColors.base.copy(alpha = SCRIM_BOTTOM),
+                                ),
+                            ),
+                    )
+                    // Sideways the picture is a narrow strip — the stream is a portrait one and
+                    // the screen's height is all it has to grow into. Four lines of a question set
+                    // across 590px of that strip is a column two words wide laid over a face; in
+                    // the space beside it the same four lines read as a sentence. So on a short
+                    // screen the words belong to the column, not to the picture.
+                    if (!compact) {
+                        words(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.xl)
+                                .padding(bottom = Spacing.lg),
+                        )
+                    }
+                }
+            }
+            val controls = @Composable {
+                StageControls(
+                    state = state,
+                    listening = listening,
+                    micAvailable = micAvailable,
+                    onPress = onPress,
+                    onRelease = onRelease,
+                    onOpenText = onOpenText,
+                    onStop = onStop,
+                    onToggleHandsfree = onToggleHandsfree,
+                    onMicTap = onMicTap,
+                    compact = compact,
                 )
             }
 
-            if (sideBySide) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.xl, Alignment.CenterHorizontally),
-                ) {
-                    when (mode) {
-                        CompanionMode.VOICE -> Orb()
-                        else -> FacePortrait(
-                            state = state,
-                            face = face,
-                            // The whole height is the face's here: nothing is stacked under it.
-                            height = available.coerceIn(FACE_MIN_HEIGHT, FACE_MAX_HEIGHT),
-                        )
-                    }
+            if (compact) {
+                // Side by side, because a screen on its side has width to spare and no height at
+                // all. Stacked, the picture and the controls were each squeezed into a band; beside
+                // each other the avatar gets the whole height and everything else gets a column.
+                //
+                // Half the screen each. The picture is wider than the stream's own shape at that
+                // size, so it crops rather than letterboxes — top-anchored, which spends the foot
+                // of the frame and keeps the head; see [AvatarSurface] below.
+                //
+                // The picture runs to the edges. Sideways there is no header band over it and
+                // nothing else in its half, so insetting it only drew slate margins around a face;
+                // the status and navigation bars are held off the *column* instead, and the
+                // picture's own top scrim keeps the clock legible where it crosses the frame.
+                Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    picture(Modifier.fillMaxHeight().weight(1f))
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = Spacing.xl)
+                            .padding(top = Spacing.md, bottom = Spacing.md),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
                     ) {
-                        bars()
-                        Box(Modifier.height(Spacing.lg))
-                        words(Modifier.weight(1f, fill = false))
+                        header()
+                        // What is being said takes the middle of the column, and the controls the
+                        // foot of it: reading order down the page, and the thumb reaches the
+                        // microphone without crossing the face.
+                        words(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(vertical = Spacing.md),
+                        )
+                        controls()
                     }
                 }
             } else {
-                val faceHeight =
-                    (available - STAGE_TEXT_RESERVE).coerceIn(FACE_MIN_HEIGHT, FACE_MAX_HEIGHT)
-
+                // The header sits on the slate, above the picture — not over it, as the canvas draws
+                // it.
+                //
+                // # Why the canvas is departed from here
+                //
+                // LiveAvatar composes tightly: measured, the stream carries about 5% of headroom
+                // over the subject, which is some 31dp once it fills a handset. That is the entire
+                // budget, and it does not grow. Drawn edge to edge the crown landed 26dp down the
+                // screen, behind the clock, and with the header laid over the picture it was behind
+                // that too. The canvas's asset has room to spare above its subject and can afford
+                // the overlay; this stream cannot.
                 Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = Spacing.xl)
+                        .padding(top = Spacing.md, bottom = Spacing.sm),
                 ) {
-                    when (mode) {
-                        CompanionMode.VOICE -> Orb()
-                        else -> FacePortrait(state = state, face = face, height = faceHeight)
-                    }
-
-                    Box(Modifier.height(Spacing.xl))
-                    bars()
-                    Box(Modifier.height(Spacing.xl))
-
-                    // `fill = false` is the whole point: the exchange takes what is left and not a
-                    // pixel more, but shrinks to its content when the answer is short, so a one-line
-                    // reply still sits centred under the face rather than floating in a tall box.
-                    words(Modifier.weight(1f, fill = false))
+                    header()
+                }
+                picture(Modifier.weight(1f).fillMaxWidth())
+                // A solid bar, not more overlay: the canvas ends the picture where the controls
+                // begin, and a microphone floating over someone's chest is a control you hesitate
+                // over.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(StageColors.base)
+                        .navigationBarsPadding()
+                        .padding(horizontal = Spacing.xl)
+                        .padding(top = Spacing.md, bottom = STAGE_BOTTOM_PADDING),
+                ) {
+                    controls()
                 }
             }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = Spacing.xl)
+                    .padding(top = Spacing.md, bottom = STAGE_BOTTOM_PADDING),
+            ) {
+                header()
+                // Nothing to look at but the words, so they take the middle.
+                words(Modifier.weight(1f).fillMaxWidth().wrapContentHeight(Alignment.CenterVertically))
+                Box(Modifier.height(Spacing.lg))
+                StageControls(
+                    state = state,
+                    listening = listening,
+                    micAvailable = micAvailable,
+                    compact = compact,
+                    onPress = onPress,
+                    onRelease = onRelease,
+                    onOpenText = onOpenText,
+                    onStop = onStop,
+                    onToggleHandsfree = onToggleHandsfree,
+                    onMicTap = onMicTap,
+                )
+            }
         }
-
-        Box(Modifier.height(Spacing.sm))
-
-        StageControls(
-            state = state,
-            mode = mode,
-            listening = listening,
-            micAvailable = micAvailable,
-            onPress = onPress,
-            onRelease = onRelease,
-            onOpenText = onOpenText,
-            onToggleVideo = onToggleVideo,
-            onToggleHandsfree = onToggleHandsfree,
-            onMicTap = onMicTap,
-        )
     }
 }
 
-/** Who you are talking to, what they are doing, and the two controls that belong to the session. */
+/**
+ * Who you are talking to, and the two settings that belong to the whole app.
+ *
+ * Canvas 14 and 14B draw the same bar in both modes, so it is one composable: a round button that
+ * swaps the face in and out, the agent's name over what mode you are in, and the language switch.
+ *
+ * # What is no longer here
+ *
+ * The back arrow. The canvas replaced it with Stop at the foot of the screen, which is the more
+ * honest control — leaving this screen closes a billed provider session, and that is a thing to do
+ * on purpose rather than by reflex on the arrow every other screen uses for "up". System back still
+ * works and still goes through the same close.
+ */
 @Composable
 private fun StageHeader(
     state: CompanionUiState,
-    listening: Boolean,
-    onBack: () -> Unit,
+    mode: CompanionMode,
+    onToggleVideo: () -> Unit,
     onToggleMute: () -> Unit,
     onToggleLanguage: () -> Unit,
     onToggleTrace: () -> Unit,
@@ -250,166 +441,137 @@ private fun StageHeader(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.companion_back),
-                tint = Color.White,
-            )
-        }
-        Text(
-            text = state.agent?.displayName.orEmpty(),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
+        GlassCircleButton(
+            icon = if (mode == CompanionMode.VIDEO) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+            contentDescription = stringResource(
+                if (mode == CompanionMode.VIDEO) R.string.companion_video_off else R.string.companion_video_on,
+            ),
+            onClick = onToggleVideo,
+            size = HEADER_BUTTON,
+        )
+        Column(
             modifier = Modifier
                 .weight(1f)
                 // The trace is for whoever is tuning this, not for the customer, so it hides behind
                 // a gesture nobody finds by accident.
                 .pointerInput(Unit) { detectTapGestures(onLongPress = { onToggleTrace() }) },
-        )
-        // The language switch belongs on the stage, not only in the thread.
-        //
-        // It picks the recogniser as well as the voice, and a spoken question in the wrong one does
-        // not come back wrong — it comes back as nonsense: pinned to id-ID, "How much money do I
-        // have" was transcribed "Oh macam mana". Android 13's automatic switching is asked for in
-        // [rememberSpeechInput], but it is a hint the service may decline, so the customer needs a
-        // control they can reach from the screen where they are actually talking.
-        //
-        // It follows the answer too — see `spokenLanguageFor` — so most of the time this reads as a
-        // status light rather than a button.
-        TextButton(onClick = onToggleLanguage, enabled = state.acceptingInput) {
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs / 2),
+        ) {
             Text(
-                text = state.language.label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
+                text = state.agent?.displayName.orEmpty(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(
+                    if (mode == CompanionMode.VIDEO) {
+                        R.string.companion_mode_avatar
+                    } else {
+                        R.string.companion_mode_voice
+                    },
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = SUBTITLE_ALPHA),
+                maxLines = 1,
             )
         }
-        IconButton(onClick = onToggleMute) {
-            Icon(
-                imageVector = if (state.muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                contentDescription = stringResource(
-                    if (state.muted) R.string.companion_unmute else R.string.companion_mute,
-                ),
-                tint = Color.White,
-            )
-        }
-        StatusPill(phase = state.phase, listening = listening)
+        // Not in the canvas, and kept anyway: the agent speaks out of the same handset the customer
+        // is holding, and the canvas gives no other way to silence it. Placed opposite the camera so
+        // the bar stays two round buttons around a name.
+        GlassCircleButton(
+            icon = if (state.muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = stringResource(
+                if (state.muted) R.string.companion_unmute else R.string.companion_mute,
+            ),
+            onClick = onToggleMute,
+            size = HEADER_BUTTON,
+        )
+        LanguagePill(
+            onToggle = onToggleLanguage,
+            enabled = state.acceptingInput,
+            content = Color.White,
+            onActive = StageColors.base,
+        )
     }
 }
 
 /**
- * The agent's face, in a portrait card.
+ * What the agent is doing, in one word.
  *
- * # Why this is not the canvas's circle
+ * # Why a badge and not a spinner
  *
- * The canvas centres a circle, and a circle is right for the orb it was drawn around. The avatar
- * video is **720×1280** — 9:16 — and a 9:16 rectangle cannot fit inside a circle whose diameter is
- * its height: the corners fall outside, so the circle slices the top of the head off flat. Measured,
- * not guessed; the first build of this screen did exactly that.
+ * Three of the four states look identical from outside: a face that is not moving could be waiting
+ * for you, thinking about what you asked, or about to speak. The canvas puts a lit pill on the
+ * screen for exactly that reason, and the word in it is the answer.
  *
- * So the video keeps the canvas's *place* and its concentric glow, and takes the shape its own
- * aspect ratio demands. The card matches the source 9:16 exactly, which means no crop and no
- * letterbox — the whole frame, at the size a face needs to read as a person.
+ * The colour follows the state as well as the word — but the word is what carries it, so the badge
+ * is still readable to anyone who cannot tell the two reds apart.
  */
 @Composable
-private fun FacePortrait(state: CompanionUiState, face: AvatarRenderTarget, height: Dp) {
-    // The source is 720x1280, so the card is sized from its height at the source's own ratio. Doing
-    // it the other way — a fixed width and a height that follows — would letterbox the video on a
-    // short screen, which is the one thing a portrait of a person must not do.
-    val width = height * FACE_ASPECT
+private fun StateBadge(phase: TurnPhase, listening: Boolean) {
+    val label = when {
+        listening -> R.string.phase_listening
+        phase == TurnPhase.THINKING -> R.string.phase_thinking
+        phase == TurnPhase.SPEAKING -> R.string.phase_speaking
+        else -> R.string.phase_idle
+    }
+    val tint = when {
+        listening -> StageColors.listening
+        phase == TurnPhase.THINKING -> StageColors.thinking
+        phase == TurnPhase.SPEAKING -> StageColors.speaking
+        else -> StageColors.idle
+    }
 
-    // Sized to the card, not to the glow. `requiredSize` on the two halo layers below lets them
-    // ignore this box's constraints and spill past its edges: they are decoration at 3% and 6%
-    // white, and they were costing 92dp of real layout — which is where the answer's second line
-    // went. A soft edge that overlaps the level bars is the intent; a portrait that pushes the
-    // conversation off the screen is not.
-    Box(modifier = Modifier.size(width, height), contentAlignment = Alignment.Center) {
-        // The canvas's concentric glow, kept so the video and the orb share a silhouette.
-        Box(
-            Modifier
-                .requiredSize(width + GLOW_OUTER, height + GLOW_OUTER)
-                .clip(FaceShape)
-                .background(Color.White.copy(alpha = GLOW_FAINT_ALPHA)),
-        )
-        Box(
-            Modifier
-                .requiredSize(width + GLOW_INNER, height + GLOW_INNER)
-                .clip(FaceShape)
-                .background(Color.White.copy(alpha = GLOW_ALPHA)),
-        )
-        AvatarSurface(
-            target = face,
-            // Black, to match the bundled stills exactly. The card reads as a framed portrait on the
-            // slate gradient, and the still-to-live swap has no background change to give it away.
-            background = Color.Black,
-            modifier = Modifier.matchParentSize().clip(FaceShape),
-            idle = {
-                state.agent?.let { AgentPoster(agentId = it.id, displayName = it.displayName) }
-            },
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(tint.copy(alpha = BADGE_FILL_ALPHA))
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs + 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs + 2.dp),
+    ) {
+        Box(Modifier.size(BADGE_DOT).clip(CircleShape).background(Color.White))
+        Text(
+            text = stringResource(label).uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = BADGE_TRACKING,
+            color = Color.White,
         )
     }
 }
 
 /**
- * The canvas's red sphere, for when the camera is off.
- *
- * Drawn rather than imported: it is two radial gradients and two rings, and a bitmap of it would be
- * one more asset to keep in step with the brand red.
- */
-@Composable
-private fun Orb() {
-    // Same bargain as the portrait: the halo is drawn outside the layout it occupies, so voice-only
-    // mode budgets its height from the orb itself rather than from the glow around it.
-    Box(modifier = Modifier.size(ORB_SIZE), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .requiredSize(ORB_SIZE + GLOW_OUTER)
-                .clip(CircleShape)
-                .background(StageColors.orb[1].copy(alpha = ORB_GLOW_FAINT_ALPHA)),
-        )
-        Box(
-            Modifier
-                .requiredSize(ORB_SIZE + GLOW_INNER)
-                .clip(CircleShape)
-                .background(StageColors.orb[1].copy(alpha = ORB_GLOW_ALPHA)),
-        )
-        Box(
-            Modifier
-                .matchParentSize()
-                .clip(CircleShape)
-                .background(
-                    // Off-centre highlight, as the canvas draws it: a sphere lit from the upper left.
-                    Brush.radialGradient(
-                        colors = StageColors.orb,
-                        center = androidx.compose.ui.geometry.Offset(ORB_LIGHT_X, ORB_LIGHT_Y),
-                    ),
-                ),
-        )
-    }
-}
-
-/**
- * Seven bars that rise and fall while anyone is talking.
+ * Bars that rise and fall while anyone is talking.
  *
  * The canvas draws them at fixed heights; here they animate, because their whole job is to say "this
  * is live". They are decorative — driven by a timer, not by the audio level — and deliberately so:
- * reading the customer's microphone amplitude to move seven rectangles would mean holding the
+ * reading the customer's microphone amplitude to move a row of rectangles would mean holding the
  * recorder open for the length of a conversation to animate a garnish.
+ *
+ * [bars] and [height] differ by mode, as the canvas draws them: a tall row of eleven in voice mode,
+ * where it is the only thing moving on the screen, and a small row of seven in avatar mode, where
+ * the face is already doing that job and this is only a sign of life under it.
  */
 @Composable
-private fun LevelBars(active: Boolean) {
+private fun LevelBars(active: Boolean, bars: Int, height: Dp) {
     val calm = rememberReducedMotion()
     val moving = active && !calm
     val pulse = rememberInfiniteTransition(label = "levels")
     Row(
         horizontalArrangement = Arrangement.spacedBy(BAR_GAP),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(BAR_MAX),
+        modifier = Modifier.height(height),
     ) {
-        BAR_HEIGHTS.forEachIndexed { index, resting ->
+        // The resting pattern repeats when more bars are asked for than the canvas drew, so the row
+        // keeps its uneven rhythm at any width instead of running out and flattening.
+        List(bars) { BAR_HEIGHTS[it % BAR_HEIGHTS.size] * (height / BAR_MAX) }
+            .forEachIndexed { index, resting ->
             val scale by pulse.animateFloat(
                 initialValue = if (moving) BAR_MIN_SCALE else 1f,
                 targetValue = if (moving) BAR_MAX_SCALE else 1f,
@@ -440,6 +602,7 @@ private fun LevelBars(active: Boolean) {
 @Composable
 private fun Exchange(
     state: CompanionUiState,
+    mode: CompanionMode,
     listening: Boolean,
     partial: String,
     onRetry: () -> Unit,
@@ -493,13 +656,25 @@ private fun Exchange(
         AnimatedVisibility(visible = question != null, enter = fadeIn(), exit = fadeOut()) {
             Text(
                 text = "“${question.orEmpty()}”",
-                style = MaterialTheme.typography.headlineSmall,
+                style = if (mode == CompanionMode.VIDEO) {
+                    MaterialTheme.typography.titleLarge
+                } else {
+                    MaterialTheme.typography.headlineSmall
+                },
                 color = Color.White,
                 textAlign = TextAlign.Center,
                 // A settled question is history and two lines of it is plenty; the whole thing is a
                 // tap away in text mode. A live partial is never cut here — [liveTail] has already
                 // trimmed it from the front, which is the end a speaker needs to see.
-                maxLines = if (live) LIVE_QUESTION_MAX_LINES else QUESTION_MAX_LINES,
+                // Four lines of live transcript over the face, as asked: enough to watch a long
+                // question land without the words climbing over the picture they are drawn on.
+                // A settled question is history and two lines of it is plenty — the whole thing is a
+                // tap away in text mode.
+                maxLines = when {
+                    !live -> QUESTION_MAX_LINES
+                    mode == CompanionMode.VIDEO -> LIVE_QUESTION_MAX_LINES_AVATAR
+                    else -> LIVE_QUESTION_MAX_LINES
+                },
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
             )
@@ -516,7 +691,11 @@ private fun Exchange(
         AnimatedVisibility(visible = answer != null, enter = fadeIn(), exit = fadeOut()) {
             Text(
                 text = streamingText(answer.orEmpty(), streaming = streaming),
-                style = MaterialTheme.typography.bodyLarge,
+                style = if (mode == CompanionMode.VIDEO) {
+                    MaterialTheme.typography.bodyMedium
+                } else {
+                    MaterialTheme.typography.bodyLarge
+                },
                 color = Color.White.copy(alpha = ANSWER_ALPHA),
                 textAlign = TextAlign.Center,
             )
@@ -596,144 +775,169 @@ private fun Modifier.fadingEdges(top: Boolean, bottom: Boolean): Modifier = this
         }
     }
 
-/** Keyboard, microphone, camera — the canvas's three circles, with its own spacing. */
+/**
+ * The canvas's three circles: text mode, the microphone, and Stop — each under its own word.
+ *
+ * # Why every control carries a label
+ *
+ * Three round buttons with icons in them is three guesses. The canvas labels all three, and the
+ * middle one needs it most: the microphone carries two gestures, neither of which a circle can show.
+ * The caption under it is also the handsfree toggle, so the gesture has a real control behind it —
+ * which is what a screen reader needs and what a double tap cannot offer.
+ *
+ * # What Stop does
+ *
+ * It ends the conversation and closes the billed provider session. It is *not* barge-in: cutting an
+ * answer short is a tap anywhere on the stage, which is the gesture you already make once you have
+ * heard enough. Stop sits at arm's length from the microphone for the same reason a call's red
+ * button does.
+ *
+ * [compact] shrinks the microphone for a screen turned on its side, where this bar was taking
+ * nearly half the height and leaving the avatar a letterbox strip.
+ */
 @Composable
 private fun StageControls(
     state: CompanionUiState,
-    mode: CompanionMode,
     listening: Boolean,
     micAvailable: Boolean,
+    compact: Boolean,
     onPress: () -> Unit,
     onRelease: () -> Unit,
     onOpenText: () -> Unit,
-    onToggleVideo: () -> Unit,
+    onStop: () -> Unit,
     onToggleHandsfree: () -> Unit,
     onMicTap: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(CONTROL_GAP, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        GlassCircleButton(
-            icon = Icons.Filled.Keyboard,
-            contentDescription = stringResource(R.string.companion_mode_text),
-            onClick = onOpenText,
-        )
-        MicButton(
-            listening = listening,
-            enabled = state.acceptingInput && micAvailable,
-            onPress = onPress,
-            onRelease = onRelease,
-            size = MIC_SIZE_PROMINENT,
-            contentDescription = stringResource(
-                if (state.handsfree) R.string.companion_handsfree_send else R.string.companion_hold_to_talk,
-            ),
-            onDoubleTap = if (micAvailable) onToggleHandsfree else null,
-            onTap = onMicTap,
-            // Between questions the microphone is shut but handsfree is still on, and an idle-looking
-            // button there would read as "it has stopped listening to me".
-            armed = state.handsfree,
-        )
-        GlassCircleButton(
-            icon = if (mode == CompanionMode.VIDEO) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
-            contentDescription = stringResource(
-                if (mode == CompanionMode.VIDEO) R.string.companion_video_off else R.string.companion_video_on,
-            ),
-            onClick = onToggleVideo,
-        )
-    }
+        LabelledControl(label = stringResource(R.string.companion_mode_text)) {
+            GlassCircleButton(
+                icon = Icons.Filled.Keyboard,
+                contentDescription = stringResource(R.string.companion_mode_text),
+                onClick = onOpenText,
+            )
+        }
 
-        // The microphone now carries two gestures and neither is visible on a round button. This
-        // line is what keeps handsfree findable — a gesture nobody is told about is a gesture nobody
-        // uses — and doubles as the mode readout once it is on.
-        // The caption is also the button.
+        // Weighted, so the middle takes whatever is left after the two side controls have their
+        // fixed width — and the caption wraps inside that rather than widening the row.
         //
-        // It already says what the double tap does, so making it tappable costs nothing visually and
-        // gives the mode a real control — which accessibility needs and the gesture cannot provide.
-        // The custom action that used to serve that purpose lived on the microphone and fired itself
-        // whenever the accessibility tree was read; a labelled, focusable target cannot.
+        // Without it the caption set the row's width, and when the row did not fit, Compose took the
+        // shortfall out of the last child: measured on a handset held sideways, End came out an oval
+        // while the microphone kept its size. A control that changes shape because of the length of
+        // a sentence beside it is a layout bug, not a style.
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            MicButton(
+                listening = listening,
+                enabled = state.acceptingInput && micAvailable,
+                onPress = onPress,
+                onRelease = onRelease,
+                size = if (compact) MIC_SIZE_LANDSCAPE else MIC_SIZE_PROMINENT,
+                contentDescription = stringResource(
+                    if (state.handsfree) R.string.companion_handsfree_send else R.string.companion_hold_to_talk,
+                ),
+                onDoubleTap = if (micAvailable) onToggleHandsfree else null,
+                onTap = onMicTap,
+                // Between questions the microphone is shut but handsfree is still on, and an
+                // idle-looking button there would read as "it has stopped listening to me".
+                armed = state.handsfree,
+            )
+            // The caption is also the button — see the note above on why the gesture needs one.
+            Text(
+                text = stringResource(
+                    if (state.handsfree) R.string.companion_mic_hint_handsfree else R.string.companion_mic_hint_hold,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = if (state.handsfree) 1f else MIC_HINT_ALPHA),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .widthIn(max = MIC_CAPTION_MAX_WIDTH)
+                    .clip(CircleShape)
+                    .clickable(
+                        enabled = micAvailable,
+                        onClickLabel = stringResource(
+                            if (state.handsfree) {
+                                R.string.companion_handsfree_off
+                            } else {
+                                R.string.companion_handsfree_on
+                            },
+                        ),
+                        role = Role.Button,
+                        onClick = onToggleHandsfree,
+                    )
+                    .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            )
+        }
+
+        LabelledControl(label = stringResource(R.string.companion_stop)) {
+            GlassCircleButton(
+                icon = Icons.Filled.Stop,
+                contentDescription = stringResource(R.string.companion_stop_hint),
+                onClick = onStop,
+            )
+        }
+    }
+}
+
+/** A round control with the canvas's word underneath it, sized so the row stays even. */
+@Composable
+private fun LabelledControl(label: String, control: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier.width(SIDE_CONTROL_WIDTH),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        control()
         Text(
-            text = stringResource(
-                if (state.handsfree) R.string.companion_mic_hint_handsfree else R.string.companion_mic_hint_hold,
-            ),
+            text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = if (state.handsfree) 1f else MIC_HINT_ALPHA),
+            color = Color.White.copy(alpha = CONTROL_LABEL_ALPHA),
             textAlign = TextAlign.Center,
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    enabled = micAvailable,
-                    onClickLabel = stringResource(
-                        if (state.handsfree) {
-                            R.string.companion_handsfree_off
-                        } else {
-                            R.string.companion_handsfree_on
-                        },
-                    ),
-                    role = Role.Button,
-                    onClick = onToggleHandsfree,
-                )
-                .padding(horizontal = Spacing.md, vertical = Spacing.xs),
         )
     }
 }
 
-/**
- * The video card, at the source's own 9:16. Bigger than the canvas's 150dp orb: an orb only has to
- * register, where a face has to be readable as a person.
- *
- * The height is a range rather than a number because the words come first — see the budget in
- * [VoiceStage]. The floor is where a face stops reading as a person and may as well be the orb; the
- * ceiling is the canvas's own size, which no handset should exceed.
- */
-private const val FACE_ASPECT = 9f / 16f
-private val FACE_MIN_HEIGHT = 208.dp
-private val FACE_MAX_HEIGHT = 352.dp
-private val FaceShape = RoundedCornerShape(28.dp)
+/** How much of the last visible line the scroll hint fades over. */
+private val EXCHANGE_FADE = 28.dp
+private val CONTROL_GAP = 22.dp
+private val STAGE_BOTTOM_PADDING = 32.dp
 
 /**
- * Height set aside for the level bars, their two gaps, and the exchange, before the face is sized.
+ * The level meter's resting pattern, taken off canvas 14's eleven bars.
  *
- * Derived, not guessed: two lines of the question at `headlineSmall` (~32dp each), three lines of
- * the answer at `bodyLarge` (~24dp each), the gap between them, the bars, and `Spacing.xl` above and
- * below. Anything longer than that scrolls or ellipsises inside the exchange rather than growing it.
+ * Uneven on purpose — a row of equal bars reads as a progress indicator. [LevelBars] repeats the
+ * pattern when it is asked for more and scales it to whatever height it is given, so the same
+ * rhythm serves the tall voice-mode row and the small one under a face.
  */
-private val STAGE_TEXT_RESERVE = 216.dp
+private val BAR_HEIGHTS =
+    listOf(18.dp, 38.dp, 26.dp, 58.dp, 44.dp, 62.dp, 32.dp, 52.dp, 22.dp, 40.dp, 14.dp)
+private val BAR_WIDTH = 5.dp
+private val BAR_GAP = 5.dp
 
-private val ORB_SIZE = 150.dp
+/** The tall row, canvas 14. [BAR_HEIGHTS] is stated against this, and scales down from it. */
+private val BAR_MAX = 64.dp
 
-/** The two concentric rings the canvas draws around its sphere. */
-private val GLOW_INNER = 44.dp
-private val GLOW_OUTER = 92.dp
-private const val GLOW_ALPHA = 0.06f
-private const val GLOW_FAINT_ALPHA = 0.03f
-private const val ORB_GLOW_ALPHA = 0.12f
-private const val ORB_GLOW_FAINT_ALPHA = 0.05f
-private const val ORB_LIGHT_X = 120f
-private const val ORB_LIGHT_Y = 100f
-
-private val BAR_HEIGHTS = listOf(10.dp, 20.dp, 14.dp, 24.dp, 8.dp, 18.dp, 12.dp)
-private val BAR_WIDTH = 4.dp
-private val BAR_GAP = 4.dp
-private val BAR_MAX = 26.dp
 private const val BAR_MIN_SCALE = 0.45f
 private const val BAR_MAX_SCALE = 1f
 private const val BAR_PERIOD_MS = 420
 private const val BAR_STAGGER_MS = 70
 private const val BAR_IDLE_ALPHA = 0.35f
 
+/** Long-form measure: the question and the answer stay readable rather than running the full width. */
+private val EXCHANGE_MAX_WIDTH = 340.dp
+
 /**
- * The tail of a live transcript, so the words a speaker just said are the ones on screen.
+ * Trims a live transcript to its last stretch.
  *
- * A partial grows while someone talks, and a text box that fills up keeps its beginning and drops
- * the end — the opposite of what the speaker is checking for. There is no ellipsis-at-the-start in
- * Compose, so the trim happens here, at a word boundary, with the ellipsis written in.
+ * The recogniser hands back the whole utterance every time, and a long question drawn from the top
+ * pushes its own newest words off the bottom — the one part a speaker is actually watching for. This
+ * keeps the end and marks the cut.
  *
  * ```
  * liveTail("kalau begitu apa saran kamu supaya tabunganku naik dan pengeluaran bisa lebih hemat")
@@ -747,17 +951,87 @@ private fun liveTail(text: String): String {
     return "…" + (tail.substringAfter(' ', tail)).trimStart()
 }
 
-/** Roughly two lines of `headlineSmall` at the exchange's width. */
-private const val LIVE_QUESTION_MAX_CHARS = 64
+/** About four lines of the stage's question type, which is what [liveTail] is trimming to fit. */
+private const val LIVE_QUESTION_MAX_CHARS = 160
+
 private const val LIVE_QUESTION_MAX_LINES = 3
+
+/** Over a face there is more room below the picture than beside an orb, and the ask was four. */
+private const val LIVE_QUESTION_MAX_LINES_AVATAR = 4
 private const val QUESTION_MAX_LINES = 2
 
-private val EXCHANGE_MAX_WIDTH = 340.dp
+/** The header's round buttons: smaller than the controls', because they sit beside a name. */
+private val HEADER_BUTTON = 42.dp
 
-/** How much of the last visible line the scroll hint fades over. */
-private val EXCHANGE_FADE = 28.dp
-private val CONTROL_GAP = 22.dp
-private val STAGE_BOTTOM_PADDING = 32.dp
+/**
+ * The most the picture is pushed down to put air above the head.
+ *
+ * A ceiling rather than a fixed inset: the drop is half of whatever vertical surplus the frame has
+ * over its box, so a stream or a screen that leaves no surplus simply gets no drop instead of a
+ * slate gap under the header.
+ *
+ * Small, because it is no longer doing the work. With the header on its own band the head is below
+ * it by construction — the frame starts there and the subject is 5% further down again. At 36dp the
+ * drop was buying air that was already bought and spending 36dp of the figure to do it, which is
+ * what made the picture read as cropped. This is the last touch of air, not the whole of it.
+ */
+private val AVATAR_DROP_MAX = 12.dp
+
+/**
+ * The shape to give the surface before the stream has said what shape it is.
+ *
+ * LiveAvatar publishes 720x1280 and has since this screen was written, so this is only the answer
+ * for the handful of frames before [AvatarRenderTarget.frameAspect] arrives with the real one.
+ */
+private const val FALLBACK_ASPECT = 9f / 16f
+
+/** Below this the window is short enough that the controls have to give the picture its room back. */
+private const val COMPACT_HEIGHT_DP = 480
+
+/** The microphone on a short screen. Still well past the 48dp touch floor. */
+private val MIC_SIZE_LANDSCAPE = 64.dp
+
+/** The canvas's two rows of level bars: eleven tall ones in voice, seven small ones over a face. */
+private const val BARS_FULL = 11
+private const val BARS_COMPACT = 7
+private val BAR_MAX_COMPACT = 20.dp
+
+/** Both side controls take the same width so the microphone stays centred between them. */
+private val SIDE_CONTROL_WIDTH = 72.dp
+
+/**
+ * How wide the microphone's caption is allowed to run.
+ *
+ * Wide enough for the Indonesian sentence — "Tahan untuk bicara · ketuk 2× untuk bebas genggam" — to
+ * settle on two lines rather than three, and no wider: the caption sits between the two side
+ * controls, and past this it starts to crowd them.
+ */
+private val MIC_CAPTION_MAX_WIDTH = 180.dp
+private const val CONTROL_LABEL_ALPHA = 0.7f
+private const val SUBTITLE_ALPHA = 0.75f
+private const val INACTIVE_LABEL_ALPHA = 0.65f
+
+/** The state pill: solid enough to read over a face, the dot and the word both white. */
+private const val BADGE_FILL_ALPHA = 0.92f
+private val BADGE_DOT = 7.dp
+private val BADGE_TRACKING = 0.12.em
+
+/**
+ * The scrim over the avatar, as the canvas grades it.
+ *
+ * Dark at the very top and heavily dark at the foot, clear through the middle — the two ends are
+ * where the chrome sits, and the face is what the middle is for.
+ */
+/** Only a seam to soften now, not a band to write a name on. */
+private const val SCRIM_SEAM = 0.28f
+private const val SCRIM_BOTTOM = 0.92f
+private const val SCRIM_CLEAR_FROM = 0.22f
+private const val SCRIM_CLEAR_TO = 0.55f
+
+private val HAIRLINE = 1.dp
+private val TOGGLE_INSET = 2.dp
+private const val GLASS_FILL_ALPHA = 0.10f
+private const val GLASS_EDGE_ALPHA = 0.22f
 private const val ANSWER_ALPHA = 0.78f
 private const val LIVE_QUESTION_ALPHA = 0.75f
 
