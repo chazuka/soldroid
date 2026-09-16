@@ -54,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.ContentScale
@@ -138,15 +139,15 @@ private fun CustomerPickerScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
         // The gutter belongs to the list, not to a wrapper, so a card can still be measured against
         // the full width when it needs to be. The bottom tier is padding rather than a trailing
         // spacer item, so it is overscroll the list knows about and not a fourth row to lay out.
         contentPadding = PaddingValues(
             start = Spacing.gutter,
             end = Spacing.gutter,
-            top = Spacing.xl,
-            bottom = Spacing.xl,
+            top = Spacing.lg,
+            bottom = Spacing.lg,
         ),
         // A ceiling on the measure, for the screen turned on its side and for anything wider.
         // Without it a card stretches to the full width, which takes the photo panel with it — it is
@@ -215,16 +216,19 @@ private fun Header(
             Spacer(Modifier.weight(1f))
             LanguagePill(language = language, onToggle = onToggleLanguage)
         }
-        Spacer(Modifier.height(Spacing.lg))
-        Text(
-            text = stringResource(R.string.customers_title),
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
         Spacer(Modifier.height(Spacing.md))
         Text(
+            text = stringResource(R.string.customers_title),
+            // One step down from the canvas's headlineMedium. Measured on a 384x832dp handset the
+            // screen overflowed by about 180dp with the model row shown, and a heading read once is
+            // the cheapest place to find some of it — this is still the largest thing on the screen.
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        Text(
             text = stringResource(R.string.customers_subtitle),
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceSecondary,
         )
 
@@ -243,9 +247,8 @@ private fun Header(
             AgentsUnavailable(reason = state.failure, onRetry = onRetry)
         }
 
-        // The list's own arrangement supplies one tier after this; this tops it up to the wider gap
-        // that separates the header group from the cards.
-        Spacer(Modifier.height(Spacing.sm))
+        // The list's own arrangement already separates the header from the cards. The extra tier
+        // this used to add was bought back to keep the third card on screen.
     }
 }
 
@@ -480,6 +483,12 @@ private fun CustomerCard(
                         text = stringResource(customer.description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceSecondary,
+                        // Three lines covers every description this build ships at the default text
+                        // size; the fourth line only ever carried the tail of one sentence. Clamped
+                        // rather than rewritten so a longer persona added later degrades quietly
+                        // instead of pushing the card — and the whole of it is one tap away.
+                        maxLines = DESCRIPTION_MAX_LINES,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Traits(customer.traits)
                 }
@@ -585,6 +594,9 @@ private const val PHOTO_FRACTION = 0.287f
  */
 /** Wide enough for the design's card, narrow enough that the sentence in it stays a sentence. */
 private val CONTENT_MAX_WIDTH = 560.dp
+
+/** Lines of a customer's description shown on the card. See the clamp for why three. */
+private const val DESCRIPTION_MAX_LINES = 3
 
 private val CARD_MIN_HEIGHT = 132.dp
 
