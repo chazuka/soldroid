@@ -69,5 +69,6 @@
     <string name="turn_retry">Coba lagi</string>
     <string name="turn_failed_inline">Jawaban tidak sampai.</string>
     <string name="answer_failed">Jawaban tidak sampai. Coba tanyakan lagi.</string>
+    <string name="answer_failed_network">Koneksi terputus, jadi jawabannya tidak sampai. Cek jaringan, lalu coba lagi.</string>
     <string name="avatar_unavailable">Wajah tidak tersedia; percakapan berlanjut lewat teks.</string>
 </resources>

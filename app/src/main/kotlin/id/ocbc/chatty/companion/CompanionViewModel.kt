@@ -1,5 +1,7 @@
 package id.ocbc.chatty.companion
 
+import android.os.SystemClock
+import java.io.IOException
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
@@ -332,11 +334,15 @@ class CompanionViewModel @Inject constructor(
         // Falls back to the demo API if the chosen brain has no key in this build, which is the same
         // rule the chooser uses — it just cannot be reached from the UI.
         val chat = brains[_state.value.brain]
+        // The draft is published on a clock, not on every token. See [Ticker] — and note the first
+        // token always lands, because the ticker starts due.
+        val draftTicks = Ticker(DRAFT_INTERVAL_MS)
+        val captionTicks = Ticker(DRAFT_INTERVAL_MS)
         val fragments = chat.reply(agent.id, history.asChatHistory())
             .onEach { fragment ->
                 answer.append(fragment)
                 mark { copy(firstTokenMs = firstTokenMs ?: elapsed()) }
-                _state.update { it.copy(draft = answer.toString()) }
+                if (draftTicks.due()) _state.update { it.copy(draft = answer.toString()) }
             }
 
         // A turn that failed — a network blip, a dropped socket — can leave this conversation with no
@@ -351,7 +357,14 @@ class CompanionViewModel @Inject constructor(
                 // No avatar, so nothing to be in step with: the caption follows the model directly.
                 // Without this the stage would show nothing at all until the turn ended, because the
                 // pacing below only runs when there is a voice pacing it.
-                fragments.collect { _state.update { state -> state.copy(caption = answer.toString()) } }
+                fragments.collect {
+                    if (captionTicks.due()) {
+                        _state.update { state -> state.copy(caption = answer.toString()) }
+                    }
+                }
+                // The clock may have swallowed the last few tokens; the caption is the only thing
+                // carrying this answer, so it ends whole rather than however far the last tick got.
+                _state.update { it.copy(caption = answer.toString()) }
             } else {
                 controller.beginUtterance()
                 utterance = open.speak(
@@ -405,7 +418,18 @@ class CompanionViewModel @Inject constructor(
                 it.copy(
                     caption = text.ifEmpty { null },
                     phase = TurnPhase.IDLE,
-                    notice = notice(if (text.isEmpty()) R.string.answer_failed else R.string.avatar_unavailable),
+                    notice = notice(
+                        when {
+                            text.isNotEmpty() -> R.string.avatar_unavailable
+                            // Naming the cause is the difference between a customer who taps retry
+                            // and one who decides the app is broken. A dropped socket, a DNS
+                            // failure, a timeout — all arrive as IOException, and all mean the same
+                            // thing to the person holding the handset: it is the connection, not
+                            // them, and trying again is worth it.
+                            failure.isNetwork() -> R.string.answer_failed_network
+                            else -> R.string.answer_failed
+                        },
+                    ),
                     retryable = if (ending.retryable) history.lastOrNull()?.text else it.retryable,
                 )
             }
@@ -751,13 +775,82 @@ class CompanionViewModel @Inject constructor(
 
     private fun notice(@StringRes message: Int) = Notice(id = ++noticeSeq, message = message)
 
+    /**
+     * Whether a failure is the network rather than the app.
+     *
+     * Every transport fault OkHttp raises — a dropped socket, a DNS miss, a read timeout — arrives as
+     * an [IOException], and coroutine machinery may wrap it, so the cause chain is walked rather than
+     * the top frame inspected. Anything else is a bug or a bad response, and saying "check your
+     * connection" about one of those sends the customer to fix something that is not broken.
+     */
+    private fun Throwable.isNetwork(): Boolean {
+        var cause: Throwable? = this
+        // Bounded rather than walked to the end. Java forbids an exception causing itself, but
+        // nothing stops two from causing each other, and an unbounded walk over that pair never
+        // returns. No real chain is anywhere near this deep.
+        repeat(CAUSE_DEPTH) {
+            if (cause == null) return false
+            if (cause is IOException) return true
+            cause = cause?.cause
+        }
+        return false
+    }
+
     private companion object {
         const val TAG = "chatty.turn"
 
         /** How often an idle conversation checks whether its session is about to be reaped. */
         const val REFRESH_CHECK_MS = 15_000L
 
+        /**
+         * How often a streaming answer is published to the screen.
+         *
+         * 50 ms. Below about that the eye reads it as continuous anyway, so anything faster is work
+         * spent on a difference nobody can see — and on the stage that work competes with video
+         * decode and audio playback for the same frame budget. See [Ticker].
+         */
+        const val DRAFT_INTERVAL_MS = 50L
+
+        /** How far to follow a failure's causes before giving up. Deeper than any real chain. */
+        const val CAUSE_DEPTH = 16
+
         /** Replace a session with this much of its life left, so no turn ever starts on a dying one. */
         const val REFRESH_MARGIN_MS = 45_000L
+    }
+}
+
+/**
+ * Lets something through at most once every [everyMs], starting due.
+ *
+ * # Why the draft is not published per token
+ *
+ * A streamed answer arrives a token at a time, and each one used to write a new `CompanionUiState`
+ * carrying `answer.toString()`. That is two costs on the same line: a fresh copy of the whole answer
+ * so far — so the allocation grows with the square of the length — and a state emission, which
+ * recomposes every part of the screen reading that state, tens of times a second, while the stage is
+ * also decoding video and playing audio.
+ *
+ * Text does not need to arrive faster than it can be read. At 50 ms the draft still looks like it is
+ * being typed, and the work behind it drops by roughly an order of magnitude on a fast model.
+ *
+ * Starting due matters: the first token must land immediately, because it is what replaces the
+ * thinking dots, and delaying that would be visible where the rest is not.
+ *
+ * ```
+ * val ticks = Ticker(50)
+ * flow.onEach { if (ticks.due()) publish(it) }
+ * ```
+ *
+ * Not thread-safe, and not meant to be: one turn, one collector, one thread.
+ */
+private class Ticker(private val everyMs: Long) {
+    private var lastAt = 0L
+
+    /** True at most once per interval; advances the clock when it says yes. */
+    fun due(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (lastAt != 0L && now - lastAt < everyMs) return false
+        lastAt = now
+        return true
     }
 }
