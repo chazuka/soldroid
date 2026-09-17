@@ -19,6 +19,20 @@ package id.ocbc.chatty.core.ai
 enum class Brain(
     /** What the chooser shows. Deliberately anonymous — see the class note. */
     val label: String,
+
+    /**
+     * Whether this stack is offered to whoever is holding the handset.
+     *
+     * The switch for showing a model *per model*, as opposed to [MODEL_CHOOSER_VISIBLE] in the
+     * picker, which shows or hides the row as a whole. Turn one off and it leaves the chooser while
+     * staying in the build: nothing else changes, because a brain the app cannot reach is a brain it
+     * never asks.
+     *
+     * Availability is still the last word. A stack with no key in this build does not appear however
+     * this flag is set — see [Brains.available] — so `true` means "offer it if you can", not "it is
+     * there".
+     */
+    val offered: Boolean = true,
 ) {
     /** The demo API's own persona, running `deepseek-v4-flash-0731` upstream. The baseline. */
     KAMARTAJ("Model 1"),
@@ -34,8 +48,19 @@ enum class Brain(
     val needsBriefing: Boolean get() = this != KAMARTAJ
 
     companion object {
-        /** The one every conversation starts on, so an untouched chooser behaves as it always did. */
-        val Default = KAMARTAJ
+        /**
+         * The one every conversation starts on, so an untouched chooser behaves as it always did.
+         *
+         * The first stack still [offered], which is [KAMARTAJ] in every ordinary build. Resolved
+         * rather than named so that switching a model off cannot leave the conversation pointed at
+         * something the chooser does not show — a selection with no segment to highlight, which
+         * reads as a broken control rather than a configured one.
+         *
+         * Falls back to [KAMARTAJ] when every stack is switched off. Nothing is offered then and the
+         * row is gone, but conversations still have to run on something, and the app's own API is
+         * the only one guaranteed to be in the build.
+         */
+        val Default: Brain = entries.firstOrNull { it.offered } ?: KAMARTAJ
     }
 }
 
@@ -59,8 +84,14 @@ enum class Brain(
  */
 class Brains(private val clients: Map<Brain, ChatClient>) {
 
-    /** Offered in declaration order, so the numbering the customer sees is stable across builds. */
-    val available: List<Brain> get() = Brain.entries.filter { it in clients }
+    /**
+     * Offered in declaration order, so the numbering the customer sees is stable across builds.
+     *
+     * Two gates, and both have to pass: the stack must have a key in this build, and it must be
+     * [Brain.offered]. The first is a fact about the APK, the second a decision about the demo, and
+     * keeping them apart means switching a model off never looks like a missing key.
+     */
+    val available: List<Brain> get() = Brain.entries.filter { it.offered && it in clients }
 
     /** The client for [brain], or the default's when this build has no key for it. */
     operator fun get(brain: Brain): ChatClient =
