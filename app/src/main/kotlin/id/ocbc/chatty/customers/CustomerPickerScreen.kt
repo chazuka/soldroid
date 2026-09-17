@@ -298,7 +298,7 @@ private fun CoachBadge() {
  * either way, the choice still travels from the app root into the conversation, and the turn trace
  * still records which stack answered — so this flag moves nothing but the row.
  */
-private const val MODEL_CHOOSER_VISIBLE = false
+private const val MODEL_CHOOSER_VISIBLE = true
 
 /**
  * Which model answers, above the customers rather than inside them.

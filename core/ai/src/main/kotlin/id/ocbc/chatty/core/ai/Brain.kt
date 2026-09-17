@@ -40,8 +40,14 @@ enum class Brain(
     /** Anthropic Claude, prompted by this app. */
     ANTHROPIC("Model 2"),
 
-    /** OpenAI GPT, prompted by this app. */
-    OPENAI("Model 3"),
+    /**
+     * OpenAI GPT, prompted by this app.
+     *
+     * Not offered in this build: the comparison on show is the demo API against one frontier model,
+     * and a third button is a third answer nobody is reading. Still constructed, still reachable if
+     * [offered] goes back to true — see the flag for why that is the whole change.
+     */
+    OPENAI("Model 3", offered = false),
     ;
 
     /** True when this app supplies the system prompt, and therefore needs the customer record. */
