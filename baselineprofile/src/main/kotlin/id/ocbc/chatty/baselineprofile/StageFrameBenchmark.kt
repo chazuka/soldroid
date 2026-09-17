@@ -4,7 +4,6 @@ import android.os.SystemClock
 import androidx.benchmark.macro.BaselineProfileMode
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.FrameTimingMetric
-import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -69,11 +68,28 @@ class StageFrameBenchmark {
         // What ships: R8-shrunk code with the Baseline Profile installed. `Require` fails loudly
         // rather than quietly measuring an interpreted build and reporting it as the product.
         compilationMode = CompilationMode.Partial(baselineProfileMode = BaselineProfileMode.Require),
-        // The process is killed between iterations so each one opens its own session. Without it the
-        // second iteration would measure a warm stage with a conversation already in it, which is a
-        // different — and much cheaper — thing than the one being investigated.
-        startupMode = StartupMode.COLD,
+        // Deliberately no `startupMode`.
+        //
+        // `StartupMode.COLD` kills the process *after* `setupBlock` and before `measureBlock`, which
+        // is right for a startup benchmark and wrong for this one: it threw away the navigation this
+        // benchmark does in setup and handed the measure block a dead app. The symptom was a tap for
+        // the text-mode control failing on a screen that, moments earlier, had been the stage.
+        //
+        // The kill is done here instead, at the top of setup, so each iteration still opens its own
+        // session — without it the second iteration would measure a warm stage with a conversation
+        // already in it — while the navigation that follows stays outside the measurement.
         setupBlock = {
+            killProcess()
+            // Granted before the app is ever launched, because on a fresh install the first
+            // conversation raises the system's notification dialog and parks it over the stage.
+            // UI Automator then taps a card that is behind a modal window and nothing happens —
+            // which is exactly how the first two runs of this benchmark failed, reporting "the stage
+            // never opened" and then "none of [Michael] is on screen" as the retry tapped the
+            // dialog.
+            //
+            // A returning customer has answered this once and never sees it again, so granting it is
+            // also the more representative state to measure.
+            GRANTS.forEach { device.executeShellCommand("pm grant $PACKAGE_NAME $it") }
             pressHome()
             startActivityAndWait()
             device.reachStage()
@@ -103,10 +119,26 @@ class StageFrameBenchmark {
         // would be true even when nothing matched, and the benchmark would sail on and tap a
         // customer card that is not on screen.
         if (onStage(UI_TIMEOUT_MS)) return
-        tapByTextOrDescription(CUSTOMER)
-        // The provider handshake is about 4.7 s, measured. The stage is up long before that — the
-        // still stands in for the face — so this waits for the controls, not for the video.
-        check(onStage(SESSION_TIMEOUT_MS)) { "the stage never opened" }
+
+        // Tapped more than once on purpose.
+        //
+        // A customer's name is drawn from a bundled string and is on screen the instant the list is,
+        // but the row it belongs to cannot open a conversation until the agent roster has arrived
+        // over the network — the card is a customer joined to an agent, and half of that join is a
+        // fetch. The first run of this benchmark tapped as soon as it saw the name, landed on a row
+        // that was not live yet, and then waited fifteen seconds for a stage nobody had opened.
+        //
+        // Retrying is the honest fix. Waiting for the roster would mean the benchmark asserting on a
+        // network call's timing, which is precisely the thing it must not measure; tapping again
+        // costs nothing once the row is live, because by then the stage is already up and the loop
+        // has exited.
+        repeat(OPEN_ATTEMPTS) {
+            tapByTextOrDescription(CUSTOMER)
+            // The provider handshake is about 4.7 s, measured. The stage is up long before that —
+            // the still stands in for the face — so this waits for the controls, not for the video.
+            if (onStage(SESSION_TIMEOUT_MS)) return
+        }
+        error("the stage never opened after $OPEN_ATTEMPTS attempts")
     }
 
     /**
@@ -118,24 +150,38 @@ class StageFrameBenchmark {
      * silently depend on the handset's locale.
      */
     private fun UiDevice.tapByTextOrDescription(candidates: List<String>) {
+        // Description first, and that order is load-bearing.
+        //
+        // A stage control is an icon button with the description on it and a caption drawn *below*
+        // it, outside its touch target — two nodes carrying the same words. Matching on text found
+        // the caption, clicked its centre, and hit nothing; the screen never changed and the next
+        // step failed looking for something that was never going to appear. Customer cards are the
+        // other way round: they carry text and no description, so they fall through to the second
+        // branch and still work.
         for (label in candidates) {
-            val byText = By.text(label)
-            if (wait(Until.hasObject(byText), UI_TIMEOUT_MS)) {
-                findObject(byText).click()
+            val byDescription = By.descContains(label)
+            if (wait(Until.hasObject(byDescription), UI_TIMEOUT_MS)) {
+                findObject(byDescription).click()
                 return
             }
-            val byDescription = By.descContains(label)
-            if (hasObject(byDescription)) {
-                findObject(byDescription).click()
+            val byText = By.text(label)
+            if (hasObject(byText)) {
+                findObject(byText).click()
                 return
             }
         }
         error("none of $candidates is on screen")
     }
 
-    /** Whether the stage's own controls are up, which is what "in a conversation" looks like. */
+    /**
+     * Whether the stage's own controls are up, which is what "in a conversation" looks like.
+     *
+     * Keyed on the text-mode control rather than the stop button, because it is the very next thing
+     * this benchmark taps: if it can be seen it can be used, and there is no window where the check
+     * passes but the tap that follows finds nothing.
+     */
     private fun UiDevice.onStage(timeoutMs: Long): Boolean =
-        wait(Until.hasObject(By.descContains(END_CALL)), timeoutMs)
+        TEXT_MODE.any { wait(Until.hasObject(By.descContains(it)), timeoutMs / TEXT_MODE.size) }
 
     private companion object {
         /** The applicationId from `:app`. Keep in step with `app/build.gradle.kts`. */
@@ -162,12 +208,23 @@ class StageFrameBenchmark {
         val SHOW_FACE = listOf("Tampilkan wajah", "Show the face")
         val STARTER = listOf("Cek saldo", "Check my balance")
         /**
-         * The stop control's accessibility description, matched as a prefix.
+         * Permissions the conversation asks for, granted ahead of the run.
          *
-         * `descContains` rather than an exact match because the description is the longer hint —
-         * "Akhiri percakapan" — while the visible label beneath it is just "Akhiri". Matching the
-         * stem catches both, and both languages, without pinning this to either string.
+         * The microphone is in the list even though this journey types rather than speaks: the stage
+         * may ask for it on entry, and a dialog appearing halfway through an observation window
+         * would be measured as the app's own frames.
          */
-        const val END_CALL = "Akhiri"
+        val GRANTS = listOf(
+            "android.permission.POST_NOTIFICATIONS",
+            "android.permission.RECORD_AUDIO",
+        )
+
+        /**
+         * How many times to try opening a conversation before giving up.
+         *
+         * Each attempt already waits out a session handshake, so this is minutes of patience, not
+         * seconds — enough for a slow roster fetch on a bad connection and no more.
+         */
+        const val OPEN_ATTEMPTS = 4
     }
 }
