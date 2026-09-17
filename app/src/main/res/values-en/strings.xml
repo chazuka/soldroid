@@ -78,5 +78,6 @@
     <string name="turn_retry">Try again</string>
     <string name="turn_failed_inline">The answer did not arrive.</string>
     <string name="answer_failed">The answer did not arrive. Try asking again.</string>
+    <string name="answer_failed_network">The connection dropped, so the answer never arrived. Check your network, then try again.</string>
     <string name="avatar_unavailable">The face is unavailable; the conversation continues in text.</string>
 </resources>
