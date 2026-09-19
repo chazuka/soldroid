@@ -17,6 +17,7 @@ import id.ocbc.chatty.core.ai.TurnPhase
 import id.ocbc.chatty.core.ai.TurnTrace
 import id.ocbc.chatty.core.ai.asChatHistory
 import id.ocbc.chatty.core.ai.sentences
+import id.ocbc.chatty.core.avatar.AvatarConnection
 import id.ocbc.chatty.core.avatar.AvatarController
 import id.ocbc.chatty.core.avatar.AvatarEvent
 import id.ocbc.chatty.core.avatar.LiveAvatarEvent
@@ -96,6 +97,15 @@ data class CompanionUiState(
      * [id.ocbc.chatty.core.avatar.AvatarController.speaking].
      */
     val avatarSpeaking: Boolean = false,
+
+    /**
+     * The room dropped and is trying to come back. The face is frozen on its last frame and
+     * nothing sent now will arrive, so the screen says so and the microphone waits.
+     */
+    val reconnecting: Boolean = false,
+
+    /** How the connection is holding up. Recorded with the turn, never shown. */
+    val connection: AvatarConnection = AvatarConnection.UNKNOWN,
     val muted: Boolean = false,
 
     /**
@@ -298,6 +308,12 @@ class CompanionViewModel @Inject constructor(
         }
         viewModelScope.launch {
             controller.speaking.collect { speaking -> _state.update { it.copy(avatarSpeaking = speaking) } }
+        }
+        viewModelScope.launch {
+            controller.reconnecting.collect { down -> _state.update { it.copy(reconnecting = down) } }
+        }
+        viewModelScope.launch {
+            controller.connection.collect { quality -> _state.update { it.copy(connection = quality) } }
         }
 
         // The notification's stop action is handled here, not on the screen.
@@ -675,6 +691,9 @@ class CompanionViewModel @Inject constructor(
                 handsfree = state.handsfree,
                 warmHit = warmed,
                 speculated = speculated.name,
+                // So a slow turn can be told apart from a slow network afterwards. Without it every
+                // complaint about lag looks identical in the data.
+                connection = state.connection.name,
                 // The answer as the customer received it, which is the length synthesis was paid
                 // for. Only its size travels — never a character of it.
                 answerChars = state.transcript.lastOrNull()

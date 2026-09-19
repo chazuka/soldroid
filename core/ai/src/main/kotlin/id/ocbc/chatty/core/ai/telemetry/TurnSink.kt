@@ -110,6 +110,14 @@ data class TurnEvent(
      */
     val speculated: String,
 
+    /**
+     * How the avatar's connection was rated while this turn ran.
+     *
+     * The dimension that separates "the model was slow" from "the network was slow". Every other
+     * timing in here is an elapsed duration, and durations alone cannot tell those apart.
+     */
+    val connection: String,
+
     val outcome: TurnOutcome,
 )
 

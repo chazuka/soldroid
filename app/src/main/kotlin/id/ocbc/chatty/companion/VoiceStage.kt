@@ -187,7 +187,11 @@ fun VoiceStage(
                     if (mode == CompanionMode.VIDEO) Spacing.md else Spacing.xl,
                 ),
             ) {
-                StateBadge(phase = state.phase, listening = listening)
+                StateBadge(
+                    phase = state.phase,
+                    listening = listening,
+                    reconnecting = state.reconnecting,
+                )
                 LevelBars(
                     active = live,
                     bars = if (mode == CompanionMode.VIDEO) BARS_COMPACT else BARS_FULL,
@@ -578,14 +582,18 @@ private fun StageHeader(
  * is still readable to anyone who cannot tell the two reds apart.
  */
 @Composable
-private fun StateBadge(phase: TurnPhase, listening: Boolean) {
+private fun StateBadge(phase: TurnPhase, listening: Boolean, reconnecting: Boolean) {
     val label = when {
+        // Outranks the rest: while the room is down the face is a still image and nothing said
+        // reaches anyone. Unsaid, the avatar reads as frozen and the customer keeps talking at it.
+        reconnecting -> R.string.phase_reconnecting
         listening -> R.string.phase_listening
         phase == TurnPhase.THINKING -> R.string.phase_thinking
         phase == TurnPhase.SPEAKING -> R.string.phase_speaking
         else -> R.string.phase_idle
     }
     val tint = when {
+        reconnecting -> StageColors.thinking
         listening -> StageColors.listening
         phase == TurnPhase.THINKING -> StageColors.thinking
         phase == TurnPhase.SPEAKING -> StageColors.speaking

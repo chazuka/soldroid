@@ -67,6 +67,7 @@
 
     <string name="phase_idle">Ready</string>
     <string name="phase_listening">Listening</string>
+    <string name="phase_reconnecting">Reconnecting</string>
     <string name="phase_thinking">Thinking</string>
     <string name="phase_speaking">Answering</string>
 

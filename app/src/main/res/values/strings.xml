@@ -58,6 +58,7 @@
 
     <string name="phase_idle">Siap</string>
     <string name="phase_listening">Mendengarkan</string>
+    <string name="phase_reconnecting">Menyambung ulang</string>
     <string name="phase_thinking">Berpikir</string>
     <string name="phase_speaking">Menjawab</string>
 
