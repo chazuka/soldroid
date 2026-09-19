@@ -51,6 +51,18 @@ internal class RoomLoudness {
     private var quietMs = 0
 
     /**
+     * The loudest sample seen since [takeReading] was last called, and how many buffers that was.
+     *
+     * Here so the threshold can be set from what this stream actually carries rather than from a
+     * number that sounded right. The first guess at [FLOOR] was wrong in the direction that breaks
+     * the app: the room read as permanently loud, the microphone never opened, and handsfree was
+     * dead until the app was restarted.
+     */
+    @Volatile
+    private var windowPeak = 0
+    private var windowBuffers = 0
+
+    /**
      * Offers one buffer of audio and returns true when [speaking] changed as a result.
      *
      * Returning the transition rather than the state is what keeps the caller off the audio thread:
@@ -67,7 +79,10 @@ internal class RoomLoudness {
         channels: Int,
         frames: Int,
     ): Boolean {
-        val loud = bitsPerSample == BITS_PER_SAMPLE && peakOf(audio) >= FLOOR
+        val peak = if (bitsPerSample == BITS_PER_SAMPLE) peakOf(audio) else 0
+        if (peak > windowPeak) windowPeak = peak
+        windowBuffers++
+        val loud = bitsPerSample == BITS_PER_SAMPLE && peak >= FLOOR
         val bufferMs = if (sampleRate > 0) frames * MILLIS_PER_SECOND / sampleRate else 0
         if (channels <= 0) return false
 
@@ -78,6 +93,20 @@ internal class RoomLoudness {
         quietMs += bufferMs
         return if (quietMs >= QUIET_MS) flip(to = false) else false
     }
+
+    /**
+     * The loudest sample since this was last asked, then starts a new window.
+     *
+     * Read from a timer on another thread, never from the audio thread, because this exists to be
+     * logged and logging is a socket write that has no business there.
+     */
+    fun takeReading(): Reading = Reading(windowPeak, windowBuffers, speaking).also {
+        windowPeak = 0
+        windowBuffers = 0
+    }
+
+    /** What the stream was doing over one window. */
+    data class Reading(val peak: Int, val buffers: Int, val speaking: Boolean)
 
     /** Forgets what it heard. Called when the track goes away, so a new one starts from silence. */
     fun reset() {
@@ -94,12 +123,20 @@ internal class RoomLoudness {
     /**
      * The loudest sample in the buffer, as an absolute 16-bit amplitude.
      *
-     * Reads the buffer's own byte order rather than assuming one, and does not disturb the caller's
-     * position, because the same buffer is on its way to the speaker.
+     * # Why the byte order is forced rather than read
+     *
+     * WebRTC's PCM is little-endian, always. The buffer it arrives in is a direct one whose `order`
+     * flag is Java's default of big-endian, because nobody set it — the flag describes the buffer,
+     * not the bytes. Trusting it shipped, and it read every sample byte-swapped: a true peak of 2,
+     * which is digital silence, came back as 0x0200, or 512, on every single window. That sat above
+     * the threshold forever, the room read as permanently loud, and handsfree never opened the
+     * microphone again.
+     *
+     * Read through a duplicate so the caller's position is untouched: the same buffer is on its way
+     * to the speaker, and this is the audio thread.
      */
     private fun peakOf(audio: ByteBuffer): Int {
-        val order = audio.order()
-        val shorts = audio.duplicate().order(order).asShortBuffer()
+        val shorts = audio.duplicate().order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
         var peak = 0
         var i = 0
         while (i < shorts.limit()) {
@@ -107,7 +144,6 @@ internal class RoomLoudness {
             if (sample > peak) peak = sample
             i += STRIDE
         }
-        audio.order(order)
         return peak
     }
 
