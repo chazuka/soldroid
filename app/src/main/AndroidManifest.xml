@@ -45,6 +45,23 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Chatty">
 
+        <!--
+            The Sentry SDK starts itself from a ContentProvider unless told not to, and this says
+            not to.
+
+            Left alone it runs before Application.onCreate, looks for a DSN in this manifest, finds
+            none — because the DSN is deliberately not here — and throws
+            `IllegalArgumentException: DSN is required`, which is a crash on launch before any of
+            this app's own code has run. Merely depending on sentry-android is enough to arm it.
+
+            Putting the DSN in the manifest would silence the crash and cost the thing the crash was
+            protecting: auto-init starts the SDK with its own defaults, before TelemetryPolicy is
+            applied, which is a window in which screenshots and failed-request bodies are governed
+            by the vendor rather than by us. So the SDK is started exactly once, explicitly, in
+            ChattyApplication, where the policy goes with it.
+        -->
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
