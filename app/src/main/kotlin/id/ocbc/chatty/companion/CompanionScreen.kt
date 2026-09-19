@@ -404,20 +404,6 @@ private fun CompanionScreen(
         if (state.handsfree && onStage) lastHeardAtMs = System.currentTimeMillis()
     }
 
-    // A language change replaces the recogniser wrapper, and the listen in flight belongs to the
-    // old one.
-    //
-    // The language is fixed when a listen *starts* — it rides in the intent — so a change can only
-    // take effect on the next one, and the one already running would go on listening in the
-    // language the customer just switched away from. Cancelling it here ends that stale listen and
-    // lets the effect below open a fresh one in the language they chose.
-    //
-    // Declared before that effect so the two run in this order on the same change: cancel, then
-    // re-arm. On first composition there is nothing listening and this does nothing.
-    LaunchedEffect(speech) {
-        speech.cancel()
-    }
-
     // One effect, deliberately. An earlier version split "open the microphone" and "close the
     // microphone" across two effects, and lost the race between them: the close ran, then a rearm
     // already in flight opened the microphone again a beat later, leaving it listening with
@@ -428,6 +414,14 @@ private fun CompanionScreen(
     // condition above it is not: handsfree stays on, the stage stays up, and the turn machine stays
     // idle. Without it the switch left a live conversation with a microphone that never opened
     // again — nothing looked broken, and nothing was heard.
+    //
+    // A listen already running is left alone. Cancelling it to restart in the new language sounds
+    // tidier and was worse: the language follows the *answer* as well as the switch, so it changes
+    // between turns on its own, and cancelling took the customer's half-spoken question with it —
+    // `startListening` against a session being torn down returns ERROR_CLIENT, which cost a
+    // recovery backoff and several seconds of a microphone that looked open and heard nothing.
+    // [SpeechInput.start] declines while one is in flight, so the listen finishes in the language
+    // it began in and the next one picks up the new one.
     LaunchedEffect(wantsMic, rearm, speech) {
         when (val intent = Handsfree.intent(
             on = state.handsfree,
