@@ -13,7 +13,10 @@ class TurnTraceTest {
         val trace = TurnTrace(askedAtMs = 0L)
 
         assertFalse(trace.complete)
-        assertEquals("llm —/—  tts —  lips —/—  0 sentence(s)", trace.summary())
+        assertEquals(
+            "llm —/—  tts —  wire —  lips —/—  audible —  0 sentence(s)",
+            trace.summary(),
+        )
     }
 
     @Test
@@ -23,14 +26,17 @@ class TurnTraceTest {
             firstTokenMs = 3782,
             answerCompleteMs = 4691,
             firstAudioMs = 4365,
+            frameSentMs = 4371,
             speakStartedMs = 5425,
+            audibleMs = 5610,
             speakEndedMs = 18679,
             sentences = 2,
         )
 
         assertTrue(trace.complete)
         assertEquals(
-            "llm 3782ms/4691ms  tts 4365ms  lips 5425ms/18679ms  2 sentence(s)",
+            "llm 3782ms/4691ms  tts 4365ms  wire 4371ms  " +
+                "lips 5425ms/18679ms  audible 5610ms  2 sentence(s)",
             trace.summary(),
         )
     }
@@ -93,6 +99,50 @@ class TurnLegsTest {
         val trace = TurnTrace(askedAtMs = 0, firstAudioMs = 1_700, speakStartedMs = 2_500)
 
         assertEquals(800L, trace.avatarMs)
+    }
+
+    // --- the avatar leg, split ------------------------------------------------------------------
+
+    @Test
+    fun `the avatar leg splits into what we cost and what the provider cost`() {
+        // The whole point of the split: 1.3s of avatar could be either side of the wire, and one
+        // opaque block cannot say which. Encoding is this app's to fix; rendering is not.
+        val trace = TurnTrace(
+            askedAtMs = 0,
+            firstAudioMs = 1_700,
+            frameSentMs = 1_712,
+            speakStartedMs = 3_000,
+        )
+
+        assertEquals(1_300L, trace.avatarMs, "the leg as a whole is unchanged")
+        assertEquals(12L, trace.uplinkMs, "base64 and JSON, which is ours")
+        assertEquals(1_288L, trace.renderMs, "the provider's, which is not")
+    }
+
+    @Test
+    fun `the room is what checks the provider's word`() {
+        val trace = TurnTrace(askedAtMs = 0, speakStartedMs = 3_000, audibleMs = 3_185)
+
+        assertEquals(185L, trace.roomMs)
+    }
+
+    @Test
+    fun `a provider that claims lips after the room already had sound reports no room leg`() {
+        // Observed on this app in the other direction: speak_ended arrived before the lips moved at
+        // all. A control socket that describes a different utterance from the one being heard must
+        // leave a gap here, not a negative number that averages away.
+        val lying = TurnTrace(askedAtMs = 0, speakStartedMs = 3_400, audibleMs = 3_000)
+
+        assertNull(lying.roomMs)
+    }
+
+    @Test
+    fun `a build with no avatar has no sub-legs to report`() {
+        val captionsOnly = TurnTrace(askedAtMs = 0, firstTokenMs = 900, firstAudioMs = 1_700)
+
+        assertNull(captionsOnly.uplinkMs)
+        assertNull(captionsOnly.renderMs)
+        assertNull(captionsOnly.roomMs)
     }
 
     @Test

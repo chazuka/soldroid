@@ -59,8 +59,36 @@ data class TurnTrace(
     /** The first PCM frame reached the avatar — i.e. the synthesizer's first byte, plus our overhead. */
     val firstAudioMs: Long? = null,
 
+    /**
+     * The first frame was encoded and handed to the socket.
+     *
+     * Splits this app's own cost out of the avatar leg. Every frame is base64'd into a JSON command
+     * before it can go, and the avatar leg was one opaque block that charged that work to the
+     * provider. Measured against [firstAudioMs] it answers a question no other number here can:
+     * whether a slow first word is the renderer or this handset.
+     *
+     * It stops at the socket's buffer, not at the far end — `WebSocket.send` enqueues and returns —
+     * so a large value means encoding was slow, and a small one does not prove the network was fast.
+     * Whether the uplink kept up is a separate fact, logged as the queue depth when the utterance is
+     * sealed.
+     */
+    val frameSentMs: Long? = null,
+
     /** The provider reported `agent.speak_started`: the lips moved. This is what the customer felt. */
     val speakStartedMs: Long? = null,
+
+    /**
+     * The room began carrying the avatar's audio, as LiveKit reports its active speakers.
+     *
+     * The only mark here that is ground truth rather than a claim. Everything else in the avatar leg
+     * is the provider describing itself over a control socket, and that description has been caught
+     * being wrong in this app: on two measured turns `agent.speak_ended` arrived *before* the lips
+     * moved at all, which is why the turn is held open by the audio's own length instead. A mark
+     * taken from the media path cannot be wrong in that way — it is the handset observing sound.
+     *
+     * Null when the answer was never spoken, and on a build with no avatar at all.
+     */
+    val audibleMs: Long? = null,
 
     /** The provider reported `agent.speak_ended`. */
     val speakEndedMs: Long? = null,
@@ -124,6 +152,33 @@ data class TurnTrace(
      */
     val avatarMs: Long? get() = both(firstAudioMs, speakStartedMs)
 
+    /**
+     * What this app spent turning the first sample into a command on the wire.
+     *
+     * The only part of the avatar leg this codebase can do anything about. If it is a few
+     * milliseconds the renderer owns the wait; if it is hundreds, the encoding does.
+     */
+    val uplinkMs: Long? get() = both(firstAudioMs, frameSentMs)
+
+    /**
+     * What the provider spent between being given audio and claiming the lips moved.
+     *
+     * [avatarMs] with this app's own encoding taken out of it, for the same reason [ttsMs] has the
+     * model's sentence-writing taken out: a leg that moves when someone else's code changes is not
+     * a measurement of the thing it is named after.
+     */
+    val renderMs: Long? get() = both(frameSentMs, speakStartedMs)
+
+    /**
+     * The gap between the provider saying the lips moved and the room actually carrying sound.
+     *
+     * Small and dull when the provider is honest, which makes it worth having: it is the check on
+     * every other number in the avatar leg. A large or negative-shaped result — [audibleMs] present
+     * with no [speakStartedMs] before it — means the control socket is describing a different
+     * utterance from the one the customer is hearing.
+     */
+    val roomMs: Long? get() = both(speakStartedMs, audibleMs)
+
     /** The span between two marks, or null unless both happened in that order. */
     private fun both(from: Long?, to: Long?): Long? =
         if (from != null && to != null && to >= from) to - from else null
@@ -133,7 +188,9 @@ data class TurnTrace(
         listenedMs?.let { append("heard ").append(it.ms()).append("  ") }
         append("llm ").append(firstTokenMs.ms()).append('/').append(answerCompleteMs.ms())
         append("  tts ").append(firstAudioMs.ms())
+        append("  wire ").append(frameSentMs.ms())
         append("  lips ").append(speakStartedMs.ms()).append('/').append(speakEndedMs.ms())
+        append("  audible ").append(audibleMs.ms())
         append("  ").append(sentences).append(" sentence(s)")
         if (starved > 0) append("  starved ").append(starved).append('x')
         if (reconnects > 0) append("  reconnected ").append(reconnects).append('x')
