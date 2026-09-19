@@ -209,6 +209,7 @@ class SentryTurnSink : TurnSink {
         open.setTag("voice", turn.voice)
         open.setTag("handsfree", turn.handsfree.toString())
         open.setTag("warm_hit", turn.warmHit.toString())
+        open.setTag("speculated", turn.speculated)
         open.setTag("outcome", turn.outcome.name)
         open.setTag("starved", turn.trace.starved.toString())
 

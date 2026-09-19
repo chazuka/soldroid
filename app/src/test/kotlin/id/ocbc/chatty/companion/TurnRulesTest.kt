@@ -3,6 +3,8 @@ package id.ocbc.chatty.companion
 import id.ocbc.chatty.core.ai.telemetry.TurnOutcome
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.Test
 
 /** The end of a turn, covered at the three places it has shipped a bug. */
@@ -120,5 +122,51 @@ class TurnOutcomeTest {
             TurnOutcome.FAILED_API,
             TurnRules.outcome(answered = false, spoke = false, interrupted = false, network = false),
         )
+    }
+}
+
+/**
+ * Whether a speculative answer may be used, which is the whole of what makes speculating safe.
+ *
+ * Getting this wrong in one direction wastes an API call. Getting it wrong in the other lets the
+ * customer hear an answer to a question they had not finished asking, in a banking app. The tests
+ * lean on that asymmetry: anything that changes a word must be treated as a different question.
+ */
+class SameQuestionTest {
+
+    @Test
+    fun `finalising tidies punctuation and case, and that is the same question`() {
+        // Exactly what a recogniser does on the way out, and if this were not allowed the
+        // speculation would essentially never be usable.
+        assertTrue(TurnRules.sameQuestion("berapa saldo saya", "Berapa saldo saya?"))
+        assertTrue(TurnRules.sameQuestion("how much do i have", "How much do I have?"))
+    }
+
+    @Test
+    fun `extra whitespace is not a different question`() {
+        assertTrue(TurnRules.sameQuestion("berapa  saldo   saya", "berapa saldo saya"))
+    }
+
+    @Test
+    fun `a customer who kept talking asked something else`() {
+        // The case this exists to catch: speculation fired on a pause, they carried on.
+        assertFalse(TurnRules.sameQuestion("berapa saldo", "berapa saldo saya sekarang"))
+    }
+
+    @Test
+    fun `a word the recogniser corrected is a different question`() {
+        assertFalse(TurnRules.sameQuestion("berapa salju saya", "berapa saldo saya"))
+    }
+
+    @Test
+    fun `dropping a word is a different question`() {
+        assertFalse(TurnRules.sameQuestion("berapa saldo saya sekarang", "berapa saldo saya"))
+    }
+
+    @Test
+    fun `a re-punctuated figure is the same question`() {
+        // "Rp3.240.000" and "rp3 240 000" are the recogniser changing its mind about separators,
+        // not the customer asking about a different number.
+        assertTrue(TurnRules.sameQuestion("apakah Rp3.240.000 cukup", "Apakah rp3 240 000 cukup?"))
     }
 }
