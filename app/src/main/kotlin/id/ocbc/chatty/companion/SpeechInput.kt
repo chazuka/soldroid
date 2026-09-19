@@ -43,8 +43,21 @@ enum class SpeechProblem {
      */
     PERMISSION_DENIED,
 
-    /** The recogniser heard nothing it could transcribe. */
+    /** The recogniser heard nothing at all. A quiet room, which in handsfree is the normal case. */
     NO_MATCH,
+
+    /**
+     * Sound arrived and the recogniser could make no words of it.
+     *
+     * Told apart from [NO_MATCH] because the two mean opposite things about the app. Silence is
+     * nothing to act on. Speech that will not transcribe is evidence, and usually of one thing:
+     * the ear is pointed at the wrong language. Measured on a handset with the switch on EN and an
+     * Indonesian question, this came back six times across eighty seconds, every one of them
+     * "speech was detected", and the customer got nothing at all while the app retried the same
+     * losing configuration. Without the distinction there is no signal to act on, because the
+     * logic that re-points the ear reads the *transcript*, and a failed recognition has none.
+     */
+    NOT_UNDERSTOOD,
 
     /**
      * Recognition needs the network and there isn't one.
@@ -473,7 +486,7 @@ private class RecognitionCallbacks(
             when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH,
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                -> SpeechProblem.NO_MATCH
+                -> if (heardSound.value) SpeechProblem.NOT_UNDERSTOOD else SpeechProblem.NO_MATCH
                 SpeechRecognizer.ERROR_NETWORK,
                 SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
                 -> SpeechProblem.NO_NETWORK

@@ -865,15 +865,43 @@ class CompanionViewModel @Inject constructor(
 
     /** Turns a microphone failure the screen reported into copy the customer actually sees. */
     fun onSpeechProblem(problem: SpeechProblem) {
+        // Speech that arrived and would not transcribe is the one failure that carries information
+        // rather than just bad news: enough of them in a row means the ear is pointed at the wrong
+        // language. Acted on here because the logic that normally re-points it reads the question,
+        // and this is the case where there is no question to read. See [ListenLanguage.afterFailure].
+        if (problem == SpeechProblem.NOT_UNDERSTOOD) {
+            unusableRecognitions += 1
+            val decision = ListenLanguage.afterFailure(_state.value.listenFor, unusableRecognitions)
+            unusableRecognitions = decision.streak
+            if (decision.language != _state.value.listenFor) {
+                Log.i(TAG, "speech kept failing to transcribe; listening for ${decision.language.label} now")
+                _state.update { it.copy(listenFor = decision.language) }
+            }
+        } else if (problem == SpeechProblem.NO_MATCH) {
+            // A quiet room says nothing about the language, so it must not count towards a switch.
+            // Without this a conversation left idle would wander between the two on its own.
+            unusableRecognitions = 0
+        }
+
         val message = when (problem) {
             SpeechProblem.PERMISSION_JUST_GRANTED -> R.string.mic_permission_needed
             SpeechProblem.PERMISSION_DENIED -> R.string.mic_denied
             SpeechProblem.UNAVAILABLE -> R.string.mic_unavailable
             SpeechProblem.NO_NETWORK -> R.string.mic_no_network
-            SpeechProblem.NO_MATCH, SpeechProblem.FAILED -> R.string.mic_no_match
+            SpeechProblem.NO_MATCH, SpeechProblem.NOT_UNDERSTOOD, SpeechProblem.FAILED ->
+                R.string.mic_no_match
         }
         _state.update { it.copy(notice = notice(message)) }
     }
+
+    /**
+     * How many times in a row the recogniser heard speech and produced nothing usable.
+     *
+     * Kept out of [CompanionUiState] for the same reason [offLanguageStreak] is: nothing draws it.
+     * It is the evidence behind a change to `listenFor`, not a thing the screen has any business
+     * knowing about.
+     */
+    private var unusableRecognitions = 0
 
     /**
      * Points the conversation at the language the app is in.
@@ -897,6 +925,7 @@ class CompanionViewModel @Inject constructor(
         // An explicit choice moves the ear at once and with no streak to serve out. The customer
         // said which language they are about to speak; there is nothing left to infer.
         offLanguageStreak = 0
+        unusableRecognitions = 0
         _state.update { it.copy(language = language, listenFor = language) }
     }
 
