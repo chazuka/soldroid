@@ -17,6 +17,61 @@ import id.ocbc.chatty.core.ai.telemetry.TurnOutcome
 object TurnRules {
 
     /**
+     * Whether a transcript is the agent's own voice coming back through the microphone.
+     *
+     * # Why this is needed at all
+     *
+     * Handsfree is half-duplex: the microphone is shut for the whole of a turn and re-armed at the
+     * end of it. The end is taken from the provider reporting `agent.speak_ended` — but that is the
+     * provider saying *it* has finished, while the audio is still crossing the network and sitting
+     * in a jitter buffer on its way to the speaker. So the microphone can open while the last
+     * seconds of the answer are still playing out loud, hear them, and ask the agent about itself.
+     *
+     * A longer pause before re-arming makes this rarer and cannot make it impossible, because the
+     * lag is a network's to decide, not ours. So the words are checked too: a question that is a
+     * verbatim run out of the answer the agent just gave is the room, not the customer.
+     *
+     * # Why verbatim, and why a run rather than the whole thing
+     *
+     * A person paraphrases; a microphone does not. Echoes come back as exact stretches of what was
+     * said, so several consecutive words matching is strong evidence and one or two is nothing —
+     * "berapa saldo saya" could easily appear inside an answer about a balance, and a customer is
+     * entitled to ask it. [ECHO_RUN_WORDS] is where that line sits.
+     *
+     * ```
+     * // answer: "Total sekitar Rp400.800.000 tersebar di rekening gaji dan deposito."
+     * isEcho("tersebar di rekening gaji dan", answer)   // true  — five words, verbatim
+     * isEcho("berapa saldo saya", answer)               // false — the customer asking
+     * ```
+     */
+    fun isEcho(question: String, lastAnswer: String?): Boolean {
+        if (lastAnswer.isNullOrBlank()) return false
+        val spoken = question.words()
+        if (spoken.size < ECHO_RUN_WORDS) return false
+        val answer = lastAnswer.words()
+        if (answer.size < ECHO_RUN_WORDS) return false
+        return spoken.windowed(ECHO_RUN_WORDS).any { run ->
+            answer.windowed(ECHO_RUN_WORDS).any { it == run }
+        }
+    }
+
+    /**
+     * How many consecutive words must match before a question is treated as the agent's own voice.
+     *
+     * Five is long enough that a customer's own phrasing is unlikely to land on it by accident, and
+     * short enough to catch the tail of a sentence, which is the part that actually leaks — the
+     * microphone opens near the end of the answer, not the start of it.
+     */
+    private const val ECHO_RUN_WORDS = 5
+
+    /** The words of a transcript, lower case, with everything that is not a word discarded. */
+    private fun String.words(): List<String> =
+        lowercase().map { if (it.isLetterOrDigit()) it else ' ' }
+            .joinToString("")
+            .split(' ')
+            .filter { it.isNotEmpty() }
+
+    /**
      * Whether two transcripts are the same question, allowing for how a recogniser tidies up.
      *
      * # Why this decides whether a speculative answer may be used

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -158,6 +159,21 @@ fun rememberSpeechInput(
     // threw away — which on the stage happens every time they mis-tap the microphone.
     val discarding = remember { mutableStateOf(false) }
 
+    // All hoisted for the same reason [discarding] is: the listener below is rebuilt on every
+    // recomposition, and partial results cause recompositions while the customer is still talking,
+    // so anything the listener keeps for itself is wiped during the utterance it is describing.
+    //
+    // [lastWordsAt] is the fallback for measuring the wait. The obvious signal, onEndOfSpeech,
+    // turned out to fire about ten milliseconds before the transcript arrives on this handset —
+    // it reports that recognition finished, not that the customer stopped — so the last time new
+    // words appeared is the honest stand-in.
+    //
+    // [peakRms] and [heardSound] exist to tell the two handsfree failures apart: audio arriving and
+    // not being recognised, versus no audio arriving at all.
+    val lastWordsAt = remember { mutableStateOf<Long?>(null) }
+    val peakRms = remember { mutableStateOf(0) }
+    val heardSound = remember { mutableStateOf(false) }
+
     // Hoisted for the same reason [discarding] is, and it was a bug before it was hoisted: the
     // listener below is rebuilt on every recomposition, and partial results cause recompositions
     // while the customer is still talking. State kept inside the listener is therefore wiped
@@ -174,6 +190,9 @@ fun rememberSpeechInput(
                 partial = partial,
                 discarding = discarding,
                 stoppedTalkingAt = stoppedTalkingAt,
+                lastWordsAt = lastWordsAt,
+                peakRms = peakRms,
+                heardSound = heardSound,
                 onResult = onResult,
                 onProblem = onProblem,
             ),
@@ -313,6 +332,27 @@ private class RecognizerSpeechInput(
     }
 }
 
+private const val SPEECH_TAG = "chatty.speech"
+
+/** The recogniser's own name for a failure, because the integer alone tells a reader nothing. */
+private fun Int.errorName(): String = when (this) {
+    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "NETWORK_TIMEOUT"
+    SpeechRecognizer.ERROR_NETWORK -> "NETWORK"
+    SpeechRecognizer.ERROR_AUDIO -> "AUDIO"
+    SpeechRecognizer.ERROR_SERVER -> "SERVER"
+    SpeechRecognizer.ERROR_CLIENT -> "CLIENT"
+    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "SPEECH_TIMEOUT"
+    SpeechRecognizer.ERROR_NO_MATCH -> "NO_MATCH"
+    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "RECOGNIZER_BUSY"
+    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "INSUFFICIENT_PERMISSIONS"
+    SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "TOO_MANY_REQUESTS"
+    SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "SERVER_DISCONNECTED"
+    SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "LANGUAGE_NOT_SUPPORTED"
+    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "LANGUAGE_UNAVAILABLE"
+    SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT -> "CANNOT_CHECK_SUPPORT"
+    else -> "UNKNOWN($this)"
+}
+
 /** The pause that ends a handsfree question. Long enough to think mid-sentence, short enough to feel answered. */
 private const val ENDPOINT_SILENCE_MS = 1_500L
 
@@ -337,6 +377,9 @@ private class RecognitionCallbacks(
     private val partial: MutableState<String>,
     private val discarding: MutableState<Boolean>,
     private val stoppedTalkingAt: MutableState<Long?>,
+    private val lastWordsAt: MutableState<Long?>,
+    private val peakRms: MutableState<Int>,
+    private val heardSound: MutableState<Boolean>,
     private val onResult: (question: String, listenedMs: Long?) -> Unit,
     private val onProblem: (SpeechProblem) -> Unit,
 ) : RecognitionListener {
@@ -347,8 +390,13 @@ private class RecognitionCallbacks(
     override fun onResults(results: Bundle?) {
         listening.value = false
         partial.value = ""
-        val listenedMs = stoppedTalkingAt.value?.let { System.currentTimeMillis() - it }
+        // The last time new words arrived, not the end-of-speech callback: on this handset that
+        // callback fires ~10ms before this one, so it measures recognition finishing rather than
+        // the customer finishing.
+        val listenedMs = lastWordsAt.value?.let { System.currentTimeMillis() - it }
+        Log.i(SPEECH_TAG, "results after ${listenedMs}ms of quiet, peak rms ${peakRms.value}")
         stoppedTalkingAt.value = null
+        lastWordsAt.value = null
         if (cancelled()) return
         val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -361,7 +409,18 @@ private class RecognitionCallbacks(
     override fun onError(error: Int) {
         listening.value = false
         partial.value = ""
+        // Logged even when it is not worth telling the customer about. A quiet room reports
+        // NO_MATCH and deliberately says nothing on screen, which is right — but it left the log
+        // unable to tell an empty room from a recogniser that refused, and handsfree failing in
+        // the field looked exactly like handsfree working in silence.
+        Log.i(
+            SPEECH_TAG,
+            "recogniser error ${error.errorName()}, " +
+                "${if (heardSound.value) "speech was detected" else "no speech detected"}, " +
+                "peak rms ${peakRms.value}",
+        )
         stoppedTalkingAt.value = null
+        lastWordsAt.value = null
         if (cancelled()) return
         onProblem(
             when (error) {
@@ -376,9 +435,28 @@ private class RecognitionCallbacks(
         )
     }
 
-    override fun onReadyForSpeech(params: Bundle?) = Unit
-    override fun onBeginningOfSpeech() = Unit
-    override fun onRmsChanged(rmsdB: Float) = Unit
+    override fun onReadyForSpeech(params: Bundle?) {
+        heardSound.value = false
+        peakRms.value = 0
+        Log.i(SPEECH_TAG, "microphone open")
+    }
+
+    override fun onBeginningOfSpeech() {
+        heardSound.value = true
+    }
+
+    /**
+     * The loudest thing heard, kept so a failure can say whether audio arrived at all.
+     *
+     * This is what separates the two ways handsfree fails. A peak near zero means nothing reached
+     * the recogniser and the problem is the microphone or whoever else is holding it; a healthy
+     * peak with no transcript means audio arrived and recognition is what failed. The callback
+     * fires many times a second, so only the peak is kept.
+     */
+    override fun onRmsChanged(rmsdB: Float) {
+        val level = rmsdB.toInt()
+        if (level > peakRms.value) peakRms.value = level
+    }
     override fun onBufferReceived(buffer: ByteArray?) = Unit
     /**
      * The recogniser has decided the customer stopped talking.
@@ -400,7 +478,13 @@ private class RecognitionCallbacks(
         partialResults
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
-            ?.let { partial.value = it }
+            ?.let {
+                // Only when the words actually changed. A recogniser that repeats its current best
+                // guess on a timer would otherwise keep resetting the clock and report no wait at
+                // all, which is the opposite of what this measures.
+                if (it != partial.value) lastWordsAt.value = System.currentTimeMillis()
+                partial.value = it
+            }
     }
     override fun onEvent(eventType: Int, params: Bundle?) = Unit
 }

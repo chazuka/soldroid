@@ -127,8 +127,25 @@ object Handsfree {
         else -> Release.SUBMIT
     }
 
-    /** A beat after the avatar stops, so the microphone does not catch the tail of the last word. */
-    const val REARM_MS = 400L
+    /**
+     * How long to wait after the avatar stops before opening the microphone again.
+     *
+     * # Why this is longer than it looks like it needs to be
+     *
+     * "The avatar stopped" is the *provider* saying it has finished sending, and at that moment the
+     * last seconds of audio are still crossing the network and sitting in a jitter buffer on their
+     * way to the speaker. Re-arming on that signal opened the microphone into the tail of the
+     * answer: it transcribed the agent and asked the agent about itself, in front of whoever was
+     * watching.
+     *
+     * A longer wait makes that rarer. It cannot make it impossible — how far behind the speaker is
+     * depends on a network, not on this constant — which is why the words are checked as well; see
+     * [TurnRules.isEcho]. This is the cheap half of the fix and the guard is the reliable half.
+     *
+     * The cost is how quickly the microphone comes back between questions, so it is kept as short
+     * as it can be while covering an ordinary buffer.
+     */
+    const val REARM_MS = 1_200L
 
     /** How long the room may stay quiet before the mode switches itself off. */
     const val QUIET_MS = 180_000L

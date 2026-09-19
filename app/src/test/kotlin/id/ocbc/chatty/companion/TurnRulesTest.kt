@@ -170,3 +170,52 @@ class SameQuestionTest {
         assertTrue(TurnRules.sameQuestion("apakah Rp3.240.000 cukup", "Apakah rp3 240 000 cukup?"))
     }
 }
+
+/**
+ * Telling the agent's own voice apart from the customer's.
+ *
+ * The failure this prevents is the worst-looking one in the app: the avatar answers, the microphone
+ * hears the tail of it, and the agent starts talking to itself in front of whoever is watching.
+ * The tests pull in both directions — an echo must be caught, and a customer must never be accused
+ * of being one.
+ */
+class EchoTest {
+
+    private val answer =
+        "Total sekitar Rp400.800.000 tersebar di rekening gaji dan deposito. Mau saya rinci?"
+
+    @Test
+    fun `a verbatim run out of the answer is the room, not the customer`() {
+        assertTrue(TurnRules.isEcho("tersebar di rekening gaji dan", answer))
+    }
+
+    @Test
+    fun `the tail of the answer is what actually leaks`() {
+        // The microphone opens near the end of the answer, so the end is what it catches.
+        assertTrue(TurnRules.isEcho("rekening gaji dan deposito mau saya rinci", answer))
+    }
+
+    @Test
+    fun `a customer asking a short question is not an echo`() {
+        assertFalse(TurnRules.isEcho("berapa saldo saya", answer))
+        assertFalse(TurnRules.isEcho("mau saya rinci", answer))
+    }
+
+    @Test
+    fun `a customer reusing the agent's words in their own sentence is not an echo`() {
+        // Genuine and common: they pick up a phrase and ask something with it. Four words of
+        // overlap, below the run length, so it stands.
+        assertFalse(TurnRules.isEcho("apa itu rekening gaji saya", answer))
+    }
+
+    @Test
+    fun `with no previous answer nothing can be an echo`() {
+        assertFalse(TurnRules.isEcho("tersebar di rekening gaji dan", null))
+        assertFalse(TurnRules.isEcho("tersebar di rekening gaji dan", ""))
+    }
+
+    @Test
+    fun `punctuation and case do not hide an echo`() {
+        assertTrue(TurnRules.isEcho("TERSEBAR, DI REKENING GAJI DAN!", answer))
+    }
+}
