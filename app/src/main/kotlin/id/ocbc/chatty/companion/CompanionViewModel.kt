@@ -517,7 +517,11 @@ class CompanionViewModel @Inject constructor(
         turns.record(
             TurnEvent(
                 trace = trace,
-                brain = state.brain.name,
+                // The anonymous label, not the enum's name. Naming the vendor here would put the
+                // brand back on every chart and undo the reason the labels are anonymous in the
+                // first place — see [Brain], where the whole point is that whoever judges these
+                // answers judges the answer.
+                brain = state.brain.label,
                 agent = agent?.id.orEmpty(),
                 language = state.language.tag,
                 // Resolved the same way the turn resolved it, so the dimension names the voice that

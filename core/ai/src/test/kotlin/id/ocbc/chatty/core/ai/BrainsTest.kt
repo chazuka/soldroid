@@ -74,3 +74,30 @@ class BrainsTest {
             throw UnsupportedOperationException("not asked in these tests")
     }
 }
+
+/**
+ * The labels stay anonymous, because they are what the comparison is reported by.
+ *
+ * Both the chooser and the telemetry group by this string. A vendor name reaching either one hands
+ * whoever is judging the answers a prior about which should be better, which is the one thing this
+ * app's own design goes out of its way to withhold.
+ */
+class BrainLabelTest {
+
+    @Test
+    fun `every label is a number, not a name`() {
+        val notAnonymous = Brain.entries.filterNot { it.label.matches(Regex("""Model \d+""")) }
+
+        assertEquals(emptyList(), notAnonymous, "these labels name something: $notAnonymous")
+    }
+
+    @Test
+    fun `no label carries a vendor's name`() {
+        val vendors = listOf("anthropic", "claude", "openai", "gpt", "deepseek", "kamartaj")
+        val leaking = Brain.entries.filter { brain ->
+            vendors.any { brain.label.contains(it, ignoreCase = true) }
+        }
+
+        assertEquals(emptyList(), leaking)
+    }
+}
