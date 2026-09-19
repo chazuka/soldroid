@@ -101,6 +101,9 @@ object TurnRules {
      * separator, which collapses "Rp3.240.000?" and "rp3 240 000" to the same key — right for this
      * purpose, because a recogniser that re-punctuates a figure has not heard a different question.
      */
+    /** [asQuestionKey], exposed so a caller can describe a mismatch without quoting either side. */
+    fun questionKey(text: String): String = text.asQuestionKey()
+
     private fun String.asQuestionKey(): String =
         lowercase().map { if (it.isLetterOrDigit()) it else ' ' }
             .joinToString("")
