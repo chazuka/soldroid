@@ -216,6 +216,7 @@ fun CompanionRoute(
             mode = next
         },
         onAsk = viewModel::ask,
+        onSpeculate = viewModel::speculate,
         onRetry = viewModel::retry,
         onInterrupt = viewModel::interrupt,
         onSpeechProblem = viewModel::onSpeechProblem,
@@ -246,6 +247,7 @@ private fun CompanionScreen(
     controller: id.ocbc.chatty.core.avatar.AvatarController,
     onModeChange: (CompanionMode) -> Unit,
     onAsk: (question: String, listenedMs: Long?) -> Unit,
+    onSpeculate: (partialQuestion: String) -> Unit,
     onRetry: () -> Unit,
     onInterrupt: () -> Unit,
     onSpeechProblem: (SpeechProblem) -> Unit,
@@ -440,7 +442,20 @@ private fun CompanionScreen(
     // here. Then we close the utterance ourselves and the recogniser delivers what it heard.
     LaunchedEffect(state.handsfree, onStage, listening, partial) {
         if (!state.handsfree || !onStage || !listening || partial.isEmpty()) return@LaunchedEffect
-        delay(HANDSFREE_SETTLE_MS)
+
+        // Partway through the pause, hand the question to the model on the strength of the partial
+        // transcript. The rest of this wait — and the recogniser's own finalising after it — then
+        // happens while an answer is already being written.
+        //
+        // This effect restarts on every new word, so a customer who is still talking cancels the
+        // speculation before it is sent and the one that eventually goes is the one they stopped
+        // on. Nothing is shown or spoken from it unless the finished transcript agrees; see
+        // [CompanionViewModel.speculate].
+        delay(HANDSFREE_SPECULATE_AFTER_MS)
+        Log.i(HANDSFREE_TAG, "speculating after ${HANDSFREE_SPECULATE_AFTER_MS}ms of quiet")
+        onSpeculate(partial)
+
+        delay(HANDSFREE_SETTLE_MS - HANDSFREE_SPECULATE_AFTER_MS)
         Log.i(HANDSFREE_TAG, "end of question: ${HANDSFREE_SETTLE_MS}ms with no new words")
         speech.stop()
     }
@@ -511,6 +526,7 @@ private fun CompanionScreen(
                 TextMode(
                     state = state,
                     onAsk = onAsk,
+                    onSpeculate = onSpeculate,
                     onRetry = onRetry,
                     onShowFace = { onModeChange(CompanionMode.VIDEO) },
                     onToggleLanguage = onToggleLanguage,
@@ -535,6 +551,7 @@ private fun CompanionScreen(
 private fun TextMode(
     state: CompanionUiState,
     onAsk: (question: String, listenedMs: Long?) -> Unit,
+    onSpeculate: (partialQuestion: String) -> Unit,
     onRetry: () -> Unit,
     onShowFace: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -862,6 +879,19 @@ private val COMPOSER_CONTROL_SIZE = 44.dp
  * pauses: engines report in bursts, and a window under about a second cuts people off mid-thought.
  */
 private const val HANDSFREE_SETTLE_MS = 1_200L
+
+/**
+ * How much of the settle to spend before asking the model to start.
+ *
+ * Long enough that someone drawing breath mid-sentence has not triggered it, short enough that the
+ * remaining 800ms of pause — plus however long the recogniser takes to finalise — is spent with an
+ * answer already being written rather than waiting to begin.
+ *
+ * Getting it wrong is cheap in one direction and free in the other: too eager wastes a request,
+ * too late merely speculates less often. It can never produce an answer to the wrong question,
+ * because the finished transcript still has to agree before a word of it is used.
+ */
+private const val HANDSFREE_SPECULATE_AFTER_MS = 400L
 
 /** The longest a single handsfree listen may run before it is closed and retried. */
 private const val HANDSFREE_MAX_LISTEN_MS = 15_000L

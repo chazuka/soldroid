@@ -101,6 +101,15 @@ data class TurnEvent(
      */
     val answerChars: Int,
 
+    /**
+     * Whether this answer was started before the question finished, and if not, why not.
+     *
+     * The rate at which speculation is adopted is the whole question of whether it is worth its
+     * cost: every miss is a billed request nobody heard. It is a dimension rather than a boolean
+     * because "we did not speculate" and "we speculated and were wrong" mean opposite things.
+     */
+    val speculated: String,
+
     val outcome: TurnOutcome,
 )
 
