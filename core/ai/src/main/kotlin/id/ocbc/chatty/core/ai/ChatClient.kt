@@ -42,6 +42,24 @@ interface ChatClient {
      * and one that pauses.
      */
     fun reply(agentId: String, history: List<ChatMessage>): Flow<String>
+
+    /**
+     * Fetches whatever this client needs before it can answer for [agentId], so the first turn does
+     * not pay for it.
+     *
+     * Called when a conversation opens, while the customer is still reading the screen and the
+     * avatar session is being negotiated — time that is already being spent. A client with nothing
+     * to prepare does nothing, which is why this defaults to a no-op rather than being a separate
+     * interface nobody could reach through [Brains].
+     *
+     * Best-effort by contract: failing here must not fail the conversation, because whatever could
+     * not be fetched will simply be fetched again on the turn that needs it.
+     *
+     * ```
+     * viewModelScope.launch { brains[brain].warm(agent.id) }   // fire and forget, on open
+     * ```
+     */
+    suspend fun warm(agentId: String) = Unit
 }
 
 /**

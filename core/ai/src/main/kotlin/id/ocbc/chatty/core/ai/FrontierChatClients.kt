@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -31,10 +33,42 @@ abstract class BriefedChatClient(
     private val records: CustomerRecords,
 ) : ChatClient {
 
+    /**
+     * Briefs already built, by persona id.
+     *
+     * A brief is two network round trips — the roster and the customer record — and both answer the
+     * same thing every time for a given persona. Built on every turn they were 330 ms of dead wait
+     * in front of the model call, measured, before a byte of the question went out. Nothing in a
+     * brief changes while the app is running, so the first turn pays for it and the rest do not.
+     *
+     * The consequence to know about: a customer record edited server-side mid-session is not picked
+     * up until the process restarts. That is the right trade for demo data that does not move, and
+     * the wrong one for a record that does — this is the line to delete if that ever changes.
+     */
+    private val briefs = mutableMapOf<String, String>()
+
+    /**
+     * Guards [briefs] across the fetch, not just the map write.
+     *
+     * Held for the whole build so two turns racing on the same cold persona make one pair of
+     * requests rather than two. Turns are serialised upstream today, so this never actually
+     * contends; it is here because a cache that can double-fetch under a race is a cache that will.
+     */
+    private val briefing = Mutex()
+
     override suspend fun agents(): List<AgentSummary> = roster.agents()
 
-    /** Builds the system prompt for [agentId], which means fetching the customer it advises. */
-    protected suspend fun brief(agentId: String): String {
+    override suspend fun warm(agentId: String) {
+        runCatching { brief(agentId) }
+    }
+
+    /** The system prompt for [agentId], fetched on first use and reused after that. */
+    protected suspend fun brief(agentId: String): String = briefing.withLock {
+        briefs[agentId] ?: build(agentId).also { briefs[agentId] = it }
+    }
+
+    /** Fetches the roster entry and the customer record [agentId] advises on, and renders a prompt. */
+    private suspend fun build(agentId: String): String {
         val summary = roster.agents().firstOrNull { it.id == agentId }
         return advisorPrompt(
             displayName = summary?.displayName ?: agentId.replaceFirstChar(Char::uppercase),
@@ -117,8 +151,17 @@ class AnthropicChatClient(
         val payload = AnthropicRequestDto(
             model = model,
             maxTokens = MAX_TOKENS,
-            system = brief(agentId),
+            // One block rather than a bare string, because a block is the only thing a cache
+            // breakpoint can be attached to. See [AnthropicSystemBlockDto].
+            system = listOf(
+                AnthropicSystemBlockDto(
+                    type = BLOCK_TEXT,
+                    text = brief(agentId),
+                    cacheControl = CacheControlDto(CACHE_EPHEMERAL),
+                ),
+            ),
             messages = history.map { AnthropicMessageDto(it.role.wire, it.content) },
+            thinking = AnthropicThinkingDto(THINKING_DISABLED),
             stream = true,
         )
         val request = Request.Builder()
@@ -197,6 +240,17 @@ const val ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 const val ANTHROPIC_MODEL = "claude-sonnet-5"
 private const val ANTHROPIC_VERSION = "2023-06-01"
 
+/**
+ * Every value below is written out at the call site rather than defaulted on the DTO.
+ *
+ * [DefaultJson] leaves `encodeDefaults` off, so a field whose value equals its declared default is
+ * dropped from the request body — silently, and the API then applies *its* default instead. That is
+ * how `thinking` and `cache_control` can be written, compile, and never leave the handset.
+ */
+private const val BLOCK_TEXT = "text"
+private const val CACHE_EPHEMERAL = "ephemeral"
+private const val THINKING_DISABLED = "disabled"
+
 /** Answers here are spoken, so they are short by instruction; this is only a runaway guard. */
 private const val MAX_TOKENS = 1024
 
@@ -224,10 +278,54 @@ private data class OpenAiDeltaDto(val content: String? = null)
 private data class AnthropicRequestDto(
     val model: String,
     @SerialName("max_tokens") val maxTokens: Int,
-    val system: String,
+    val system: List<AnthropicSystemBlockDto>,
     val messages: List<AnthropicMessageDto>,
+    val thinking: AnthropicThinkingDto,
     val stream: Boolean = false,
 )
+
+/**
+ * A block of the system prompt, and optionally a cache breakpoint on the end of it.
+ *
+ * The whole brief — the advisor rules and the customer's record — is one block because all of it is
+ * identical from one turn to the next; the question that differs rides in `messages`, after it.
+ * That is what makes the prefix reusable: caching is a prefix match, so anything volatile placed
+ * ahead of the breakpoint would invalidate everything behind it on every turn.
+ */
+@Serializable
+private data class AnthropicSystemBlockDto(
+    val type: String,
+    val text: String,
+    @SerialName("cache_control") val cacheControl: CacheControlDto? = null,
+)
+
+/**
+ * Marks the end of the reusable prefix.
+ *
+ * Measured on this app's own prompt: 5,422 input tokens, re-read in full on every turn. Cached they
+ * are billed at a tenth of that from the second turn on, which is the whole of why this is here —
+ * it did **not** move time to the first token (2,865 ms cached against 2,822 ms not), so it is a
+ * cost fix and should not be sold as a speed one. The default five-minute window outlives the gap
+ * between questions in a live conversation, and every read pushes the expiry out again.
+ */
+@Serializable
+private data class CacheControlDto(val type: String)
+
+/**
+ * How much the model deliberates before it starts writing. Off.
+ *
+ * Sonnet 5 thinks adaptively when this field is absent, and absent is what it was: measured through
+ * this app's own prompt that cost **2,822–3,230 ms** before the first word, against **1,201 ms**
+ * with it disabled. Through the full pipeline that is most of two seconds of a face sitting still.
+ *
+ * It is the same trade already made for GPT-5 in [OPENAI_REASONING_EFFORT] and it is the same
+ * reasoning: an adviser reading figures off a record they were handed is doing recall and phrasing,
+ * not deliberation. Turn it back on (`"adaptive"`) for work that genuinely reasons, and expect the
+ * wait back. `{"type": "adaptive"}` with `output_config.effort` at `low` is the middle setting —
+ * 1,521 ms measured — if an answer ever needs the thinking back but not all of it.
+ */
+@Serializable
+private data class AnthropicThinkingDto(val type: String)
 
 @Serializable
 private data class AnthropicMessageDto(val role: String, val content: String)

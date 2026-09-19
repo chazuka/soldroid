@@ -32,21 +32,33 @@ class ElevenLabsSynthesizerTest {
     fun stop() = server.close()
 
     @Test
-    fun `audio is cut into one-second frames, remainder last`() = runTest {
+    fun `the lead frame is short, the rest are one second, remainder last`() = runTest {
+        val lead = ElevenLabsSynthesizer.LEAD_FRAME_BYTES.toInt()
         val frameBytes = ElevenLabsSynthesizer.FRAME_BYTES.toInt()
         val remainder = 1_234
-        server.enqueue(pcmResponse(frameBytes * 2 + remainder))
+        server.enqueue(pcmResponse(lead + frameBytes * 2 + remainder))
 
         val frames = synthesizer.speak("voice", "halo", Language.INDONESIAN).toList()
 
-        assertEquals(listOf(frameBytes, frameBytes, remainder), frames.map { it.size })
+        assertEquals(listOf(lead, frameBytes, frameBytes, remainder), frames.map { it.size })
     }
 
     @Test
-    fun `audio shorter than one frame is still emitted`() = runTest {
+    fun `audio shorter than the lead frame is still emitted`() = runTest {
         server.enqueue(pcmResponse(512))
 
         assertEquals(listOf(512), synthesizer.speak("voice", "halo", Language.INDONESIAN).toList().map { it.size })
+    }
+
+    @Test
+    fun `the synthesizer is told the language and left to say what it is given`() = runTest {
+        server.enqueue(pcmResponse(64))
+
+        synthesizer.speak("voice", "halo", Language.ENGLISH).toList()
+
+        val body = server.takeRequest().body!!.utf8()
+        assertTrue(body.contains(""""language_code":"en""""))
+        assertTrue(body.contains(""""apply_text_normalization":"off""""))
     }
 
     @Test

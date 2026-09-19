@@ -254,6 +254,9 @@ class CompanionViewModel @Inject constructor(
         )
 
         viewModelScope.launch { openSession(agent) }
+        // Warm the chosen brain's brief while the screen and the avatar session are still being
+        // set up, so the first question does not pay for it. See [ChatClient.warm].
+        viewModelScope.launch { brains[brain].warm(agent.id) }
         startRefreshWatchdog(agent)
     }
 
