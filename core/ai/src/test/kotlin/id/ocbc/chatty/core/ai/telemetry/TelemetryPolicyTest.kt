@@ -74,6 +74,17 @@ class TelemetryPolicyTest {
     }
 
     @Test
+    fun `a bare path is scrubbed too, not just a whole URL`() {
+        // Breadcrumbs carry the address as a path rather than a full URL, and on a real device that
+        // difference shipped an unscrubbed voice id while the spans beside it were clean.
+        assertEquals(
+            "/v1/text-to-speech/{voice}/stream",
+            scrubUrl("/v1/text-to-speech/cjVigY5qzO86Huf0OWal/stream"),
+        )
+        assertEquals("/api/customers/{persona}", scrubUrl("/api/customers/alvin"))
+    }
+
+    @Test
     fun `a URL with nobody's name in it is left alone`() {
         val url = "https://api.anthropic.com/v1/messages"
         assertEquals(url, scrubUrl(url))

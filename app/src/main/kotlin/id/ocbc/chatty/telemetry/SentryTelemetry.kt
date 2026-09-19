@@ -41,11 +41,16 @@ object SentryTelemetry {
      * configured a backend for, so it is a supported configuration rather than an error: the app
      * runs, turns are still recorded to logcat by [LogTurnSink], and nothing is sent.
      */
-    fun start(context: Context, dsn: String, policy: TelemetryPolicy) {
+    fun start(context: Context, dsn: String, policy: TelemetryPolicy, debug: Boolean = false) {
         if (dsn.isBlank() || policy.recordsNothing) return
 
         SentryAndroid.init(context) { options ->
             options.dsn = dsn
+            // Whether anything is actually reaching Sentry is otherwise unanswerable from the
+            // handset: the SDK is silent by default, so a misconfigured DSN and a working one look
+            // identical in logcat. On in debug builds only — it is noisy, and a release build has
+            // nobody reading its log.
+            options.isDebug = debug
             options.tracesSampleRate = policy.sampleRate
 
             // Both would attach the open transcript — the figures, on screen — to an error report.
@@ -78,6 +83,26 @@ object SentryTelemetry {
                 }
             }
 
+            if (policy.scrubUrls) {
+                // Spans carry the address a second time, in their data map, and under whichever key
+                // the integration chose. Rewriting named keys is what failed here: "url" was
+                // handled, "path" was not, and the raw voice id shipped while the description
+                // beside it read {voice}. So every string value is swept instead — a value that
+                // contains no identifying segment comes back unchanged, and a key nobody
+                // anticipated is covered anyway.
+                options.setBeforeSendTransaction { transaction, _ ->
+                    transaction.also {
+                        it.spans.forEach { span ->
+                            span.data?.let { data ->
+                                span.data = data.mapValues { (_, value) ->
+                                    if (value is String) scrubUrl(value) else value
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (!policy.httpBreadcrumbs) {
                 options.setBeforeBreadcrumb { breadcrumb, _ ->
                     if (breadcrumb.type == BREADCRUMB_HTTP) null else breadcrumb
@@ -85,8 +110,12 @@ object SentryTelemetry {
             } else if (policy.scrubUrls) {
                 options.setBeforeBreadcrumb { breadcrumb, _ ->
                     breadcrumb.also { crumb ->
-                        (crumb.data[BREADCRUMB_URL] as? String)?.let {
-                            crumb.data[BREADCRUMB_URL] = scrubUrl(it)
+                        // Both keys, because the SDK uses whichever suits the integration and
+                        // guessing wrong is silent. Verified on a device: OkHttp breadcrumbs put
+                        // the address under "path", so scrubbing only "url" shipped the voice id
+                        // in full while the spans beside it were correctly rewritten.
+                        for (key in BREADCRUMB_ADDRESS_KEYS) {
+                            (crumb.data[key] as? String)?.let { crumb.data[key] = scrubUrl(it) }
                         }
                     }
                 }
@@ -120,7 +149,9 @@ object SentryTelemetry {
     )
 
     private const val BREADCRUMB_HTTP = "http"
-    private const val BREADCRUMB_URL = "url"
+
+    /** Every key an HTTP breadcrumb may carry an address under. */
+    private val BREADCRUMB_ADDRESS_KEYS = listOf("url", "path")
     private const val SERVER_ERROR_FROM = 500
     private const val SERVER_ERROR_TO = 599
     private const val ANY_TARGET = ".*"

@@ -118,7 +118,7 @@ interface SpeechInput {
  * ```
  * val speech = rememberSpeechInput(onResult = viewModel::ask, onProblem = viewModel::onSpeechProblem)
  * // onResult also reports how long the recogniser took to decide, which is the one leg of a turn
- * // that happens before the turn starts. See RecognitionCallbacks.stoppedTalkingAtMs.
+ * // that happens before the turn starts. See RecognitionCallbacks.onEndOfSpeech.
  * MicButton(
  *     enabled = speech.available,
  *     onPress = { speech.start() },
@@ -158,6 +158,13 @@ fun rememberSpeechInput(
     // threw away — which on the stage happens every time they mis-tap the microphone.
     val discarding = remember { mutableStateOf(false) }
 
+    // Hoisted for the same reason [discarding] is, and it was a bug before it was hoisted: the
+    // listener below is rebuilt on every recomposition, and partial results cause recompositions
+    // while the customer is still talking. State kept inside the listener is therefore wiped
+    // between the end of speech and the transcript arriving — which is precisely the interval this
+    // measures, so it read null on every single question.
+    val stoppedTalkingAt = remember { mutableStateOf<Long?>(null) }
+
     // The listener closes over the callers' lambdas, which are recreated on every recomposition.
     // Re-attaching it each time is cheap and keeps a stale `onResult` from answering a live turn.
     DisposableEffect(recognizer, onResult, onProblem) {
@@ -166,6 +173,7 @@ fun rememberSpeechInput(
                 listening = listening,
                 partial = partial,
                 discarding = discarding,
+                stoppedTalkingAt = stoppedTalkingAt,
                 onResult = onResult,
                 onProblem = onProblem,
             ),
@@ -328,22 +336,10 @@ private class RecognitionCallbacks(
     private val listening: MutableState<Boolean>,
     private val partial: MutableState<String>,
     private val discarding: MutableState<Boolean>,
+    private val stoppedTalkingAt: MutableState<Long?>,
     private val onResult: (question: String, listenedMs: Long?) -> Unit,
     private val onProblem: (SpeechProblem) -> Unit,
 ) : RecognitionListener {
-
-    /**
-     * When the recogniser decided the customer had stopped talking.
-     *
-     * The start of the only leg of a turn that happens before the turn does: everything between
-     * here and [onResults] is the recogniser making up its mind, and in handsfree that includes the
-     * fixed silence it waits out before it will call a sentence finished. It was invisible for the
-     * life of this app — the trace begins when the *question arrives* — which made the wait the
-     * customer feels most sharply the one nobody could put a number on.
-     *
-     * Null when the engine never reported an end of speech, which some implementations do not.
-     */
-    private var stoppedTalkingAtMs: Long? = null
 
     /** True once for the one callback that a [SpeechInput.cancel] is still going to produce. */
     private fun cancelled(): Boolean = discarding.value.also { discarding.value = false }
@@ -351,8 +347,8 @@ private class RecognitionCallbacks(
     override fun onResults(results: Bundle?) {
         listening.value = false
         partial.value = ""
-        val listenedMs = stoppedTalkingAtMs?.let { System.currentTimeMillis() - it }
-        stoppedTalkingAtMs = null
+        val listenedMs = stoppedTalkingAt.value?.let { System.currentTimeMillis() - it }
+        stoppedTalkingAt.value = null
         if (cancelled()) return
         val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -365,7 +361,7 @@ private class RecognitionCallbacks(
     override fun onError(error: Int) {
         listening.value = false
         partial.value = ""
-        stoppedTalkingAtMs = null
+        stoppedTalkingAt.value = null
         if (cancelled()) return
         onProblem(
             when (error) {
@@ -384,8 +380,20 @@ private class RecognitionCallbacks(
     override fun onBeginningOfSpeech() = Unit
     override fun onRmsChanged(rmsdB: Float) = Unit
     override fun onBufferReceived(buffer: ByteArray?) = Unit
+    /**
+     * The recogniser has decided the customer stopped talking.
+     *
+     * The start of the only leg of a turn that happens before the turn does: everything between
+     * here and [onResults] is the recogniser making up its mind, and in handsfree that includes the
+     * fixed silence it waits out before it will call a sentence finished. It was invisible for the
+     * life of this app — the trace begins when the *question arrives* — which made the wait the
+     * customer feels most sharply the one nobody could put a number on.
+     *
+     * Stored in hoisted state rather than a field here, because this object does not survive the
+     * interval it is timing. See [stoppedTalkingAt].
+     */
     override fun onEndOfSpeech() {
-        stoppedTalkingAtMs = System.currentTimeMillis()
+        stoppedTalkingAt.value = System.currentTimeMillis()
     }
     override fun onPartialResults(partialResults: Bundle?) {
         if (discarding.value) return

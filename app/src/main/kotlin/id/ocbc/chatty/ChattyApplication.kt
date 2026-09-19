@@ -21,6 +21,11 @@ import id.ocbc.chatty.telemetry.SentryTelemetry
 class ChattyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        SentryTelemetry.start(this, BuildConfig.SENTRY_DSN, TelemetryPolicy.Default)
+        SentryTelemetry.start(
+            context = this,
+            dsn = BuildConfig.SENTRY_DSN,
+            policy = TelemetryPolicy.Default,
+            debug = BuildConfig.DEBUG,
+        )
     }
 }
