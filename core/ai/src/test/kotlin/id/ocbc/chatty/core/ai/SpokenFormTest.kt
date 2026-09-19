@@ -333,3 +333,49 @@ class SpokenFormTest {
         }
     }
 }
+/**
+ * Rates, which the synthesizer used to read for us.
+ *
+ * Its own text normalization expanded the slash and was switched off to save latency on every
+ * clause. A slash the voice cannot say is a slash it drops, and "five million rupiah bulan" is not
+ * an amount anybody states — so the expansion moved here, where it is tested.
+ */
+class RateSlashTest {
+
+    @Test
+    fun `a monthly figure is said per month`() {
+        assertEquals(
+            "lima juta rupiah per bulan",
+            spokenForm("Rp5.000.000/bulan", Language.INDONESIAN),
+        )
+    }
+
+    @Test
+    fun `the same rule reads in English`() {
+        assertEquals(
+            "five million rupiah per month",
+            spokenForm("Rp5,000,000/month", Language.ENGLISH),
+        )
+    }
+
+    @Test
+    fun `a slash mid-sentence does not disturb the words around it`() {
+        assertEquals(
+            "Pengeluaran dua belas juta lima ratus ribu rupiah per bulan naik.",
+            spokenForm("Pengeluaran Rp12.500.000/bulan naik.", Language.INDONESIAN),
+        )
+    }
+
+    @Test
+    fun `a slash that is already spaced is left alone`() {
+        // Someone writing "A / B" has already put the separator where they want it, and adding
+        // another space around it would only produce a stutter.
+        assertEquals("satu / dua", spokenForm("1 / 2", Language.INDONESIAN))
+    }
+
+    @Test
+    fun `an Indonesian fraction reads correctly by the same rule`() {
+        // "tiga per dua belas" is how this is said, so the rate rule happens to be right here too.
+        assertEquals("tiga per dua belas", spokenForm("3/12", Language.INDONESIAN))
+    }
+}
