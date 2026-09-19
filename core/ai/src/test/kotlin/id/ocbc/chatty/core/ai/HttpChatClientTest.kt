@@ -61,7 +61,7 @@ class HttpChatClientTest {
     fun `reply emits the answer as it streams and rebuilds it in order`() = runTest {
         server.enqueue(sse(REPLY_CHUNKS))
 
-        val parts = client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+        val parts = client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
 
         assertEquals(listOf("Tabungan", "mu ", "naik."), parts)
         assertEquals("Tabunganmu naik.", parts.joinToString(""))
@@ -83,7 +83,7 @@ class HttpChatClientTest {
 
         assertEquals(
             listOf("Halo."),
-            client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList(),
+            client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList(),
         )
     }
 
@@ -91,7 +91,7 @@ class HttpChatClientTest {
     fun `reply asks for a stream`() = runTest {
         server.enqueue(sse(REPLY_CHUNKS))
 
-        client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+        client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
 
         val body = server.takeRequest().body!!.utf8()
         assertTrue(body.contains(""""stream":true"""))
@@ -103,7 +103,7 @@ class HttpChatClientTest {
 
         val failure = assertThrows(ChatApiException::class.java) {
             kotlinx.coroutines.runBlocking {
-                client.reply("nope", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+                client.reply("nope", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
             }
         }
 
@@ -130,7 +130,7 @@ class HttpChatClientTest {
 
         assertThrows(ChatApiException::class.java) {
             kotlinx.coroutines.runBlocking {
-                client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+                client.reply("emma", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
             }
         }
     }

@@ -24,9 +24,17 @@ enum class Language(
     val label: String,
     /** The key this language uses in `agents.json`. */
     val key: String,
+    /**
+     * What to call this language when telling a model which one to answer in.
+     *
+     * In English because the instruction around it is, and because a model told to reply in
+     * "Bahasa Indonesia" inside an otherwise-English sentence has been known to switch the whole
+     * answer's register. See [languageDirective].
+     */
+    val spokenName: String,
 ) {
-    INDONESIAN("id-ID", "ID", "id"),
-    ENGLISH("en-US", "EN", "en"),
+    INDONESIAN("id-ID", "ID", "id", "Indonesian"),
+    ENGLISH("en-US", "EN", "en", "English"),
     ;
 
     /** The other one. With exactly two languages, "switch" needs no menu. */

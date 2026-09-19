@@ -40,7 +40,7 @@ class FrontierChatClientsTest {
     fun `the model is told not to think before it answers`() = runTest {
         server.enqueue(streamOf("Halo."))
 
-        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
 
         val body = server.takeRequest().body!!.utf8()
         assertTrue(body.contains(""""thinking":{"type":"disabled"}"""), body.take(400))
@@ -50,7 +50,7 @@ class FrontierChatClientsTest {
     fun `the brief is sent as a cached block, and the question is not in it`() = runTest {
         server.enqueue(streamOf("Halo."))
 
-        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "berapa saldo saya"))).toList()
+        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "berapa saldo saya")), Language.INDONESIAN).toList()
 
         val body = server.takeRequest().body!!.utf8()
         // The breakpoint sits on the system block, so everything before it — the whole brief — is
@@ -65,7 +65,7 @@ class FrontierChatClientsTest {
     fun `the brief is fetched once, not once per turn`() = runTest {
         repeat(3) {
             server.enqueue(streamOf("Halo."))
-            client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+            client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
         }
 
         assertEquals(1, roster.calls.get())
@@ -79,7 +79,7 @@ class FrontierChatClientsTest {
         assertEquals(1, records.calls.get())
 
         server.enqueue(streamOf("Halo."))
-        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
 
         assertEquals(1, roster.calls.get())
         assertEquals(1, records.calls.get())
@@ -92,7 +92,7 @@ class FrontierChatClientsTest {
         client.warm("alvin")
 
         server.enqueue(streamOf("Halo."))
-        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo"))).toList()
+        client.reply("alvin", listOf(ChatMessage(ChatMessage.Role.USER, "halo")), Language.INDONESIAN).toList()
 
         // The failed warm must not have cached anything, or the turn would answer with a brief that
         // was never built.
@@ -118,7 +118,7 @@ class FrontierChatClientsTest {
             return listOf(AgentSummary("alvin", "Alvin", "a financial coach"))
         }
 
-        override fun reply(agentId: String, history: List<ChatMessage>) =
+        override fun reply(agentId: String, history: List<ChatMessage>, speaking: Language) =
             throw UnsupportedOperationException("the roster never answers a turn")
     }
 

@@ -98,10 +98,44 @@ dashes and no en dashes — the long ones — and no semicolons: they are the pu
 drafted, and this is meant to sound spoken. Where you would reach for one, a comma or a new sentence
 says the same thing and sounds more like you.
 
-Reply in the language the customer used. In Indonesian, write amounts the Indonesian way —
-Rp3.240.000, 1,2% — because the app converts those into spoken words before they are said; in
-English, write them the English way.
+Which language to answer in arrives with each question, as its own instruction. Write amounts to
+match it. In Indonesian that is Rp3.240.000 and 1,2%, in English it is the English way round,
+because the app turns those into spoken words before they are said and it spells what it is given.
 
 THE CUSTOMER
 $customerRecordJson
 """.trimIndent()
+
+/**
+ * Tells the model which language to answer this one question in.
+ *
+ * # Why the standing prompt could not do this
+ *
+ * [advisorPrompt] used to carry the whole rule as "reply in the language the customer used", and the
+ * switch on the top bar was never sent at all. That reads fine and fails in practice, because by the
+ * second turn "the customer" is a transcript rather than a sentence: the model weighs every earlier
+ * line and follows whichever language dominates. Observed with the switch on EN and an English
+ * "good afternoon" answered in Indonesian, because everything before it had been Indonesian.
+ *
+ * So the rule is per-turn and says both halves out loud. The switch is the default, because it is
+ * the one thing the customer stated on purpose. Their most recent message overrides it, because
+ * asking in the other language is also a statement and a companion that answers in the wrong one is
+ * useless. And the history explicitly decides nothing, which is the part that was going wrong.
+ *
+ * Sent as its own message after the persona brief, never folded into it: the brief is identical for
+ * every turn and carries the cache breakpoint that makes it cheap, and a string that changes per
+ * turn inside it would invalidate that on every question.
+ *
+ * ```
+ * // with the switch on EN
+ * languageDirective(Language.ENGLISH)
+ * // "The app is set to English. Answer in English, unless the customer's most recent message is
+ * //  clearly in Indonesian, in which case answer in Indonesian. Earlier turns do not decide this."
+ * ```
+ */
+fun languageDirective(speaking: Language): String {
+    val other = speaking.toggled().spokenName
+    return "The app is set to ${speaking.spokenName}. Answer in ${speaking.spokenName}, unless " +
+        "the customer's most recent message is clearly in $other, in which case answer in $other. " +
+        "Earlier turns do not decide this, only the most recent message does."
+}
