@@ -322,6 +322,18 @@ private fun CompanionScreen(
             micRetryDelayMs = 0L
             Log.i(HANDSFREE_TAG, "heard a question of ${question.length} chars in ${listenedMs}ms")
             onAsk(question, listenedMs)
+            // Ask for another listen whatever came of that one.
+            //
+            // A question usually starts a turn, and the turn is what re-arms the microphone: it
+            // takes `acceptingInput` false and then true again, and that is a key of the effect
+            // below. A question that starts no turn has no such edge — the agent's own voice
+            // arriving back through the microphone, an empty transcript, a question while the
+            // previous turn is somehow still running — and handsfree simply stopped, showing
+            // READY, listening to nothing, until something else happened to recompose the screen.
+            //
+            // Asking here costs nothing when a turn did start: the effect re-runs, sees a turn in
+            // flight, and closes the microphone exactly as it would have.
+            rearm += 1
         },
         onProblem = { problem ->
             // Both decisions belong to [Handsfree]: what the failure really was, and what to do
