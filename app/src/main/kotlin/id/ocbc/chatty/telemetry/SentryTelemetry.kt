@@ -34,6 +34,11 @@ import io.sentry.okhttp.SentryOkHttpInterceptor
  */
 object SentryTelemetry {
 
+    /** Where a build's turns land in Sentry, so test traffic and real traffic never mix. */
+    private const val ENV_PRODUCTION = "production"
+    private const val ENV_DEVELOPMENT = "development"
+
+
     /**
      * Brings Sentry up against [policy], or does nothing at all when [dsn] is blank.
      *
@@ -52,6 +57,16 @@ object SentryTelemetry {
             // nobody reading its log.
             options.isDebug = debug
             options.tracesSampleRate = policy.sampleRate
+
+            // Keep test turns out of the numbers the demo is judged on.
+            //
+            // Sentry defaults every event to "production", so a debug build lands its turns beside
+            // real ones and there is no way to tell them apart afterwards. That is not a cosmetic
+            // problem here: the whole point of these measurements is comparing one model, persona
+            // or voice against another, and a morning of rig testing is enough to move a mean.
+            // Found by reading an envelope off the handset during a scripted run and seeing every
+            // one of those turns tagged production.
+            options.environment = if (debug) ENV_DEVELOPMENT else ENV_PRODUCTION
 
             // Both would attach the open transcript — the figures, on screen — to an error report.
             options.isAttachScreenshot = policy.attachScreenshot
