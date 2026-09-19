@@ -214,26 +214,24 @@ class SentryTurnSink : TurnSink {
         open.setTag("starved", turn.trace.starved.toString())
 
         val trace = turn.trace
-        trace.listenedMs?.let { open.setMeasurement("listened_ms", it) }
-        trace.firstTokenMs?.let { open.setMeasurement("first_token_ms", it) }
-        trace.firstAudioMs?.let { open.setMeasurement("first_audio_ms", it) }
-        trace.speakStartedMs?.let { open.setMeasurement("lips_moved_ms", it) }
-        // The legs in isolation, so a chart does not have to subtract two columns to ask "was that
-        // the synthesizer or the renderer". See TurnTrace for why they are derived rather than marked.
-        trace.clauseMs?.let { open.setMeasurement("clause_ms", it) }
-        trace.ttsMs?.let { open.setMeasurement("tts_ms", it) }
-        trace.avatarMs?.let { open.setMeasurement("avatar_ms", it) }
+        // Iterated rather than listed. The adapter used to name each field, and three marks were
+        // added to TurnTrace without reaching the backend at all, which is the kind of gap nobody
+        // notices until a dashboard has been answering a question wrongly for weeks.
+        trace.measurements().forEach { (name, value) -> open.setMeasurement(name, value) }
         open.setMeasurement("answer_chars", turn.answerChars)
-        open.setMeasurement("sentences", trace.sentences)
-        open.setMeasurement("starved", trace.starved)
-        open.setMeasurement("reconnects", trace.reconnects)
 
         // The legs, as spans, so the transaction reads as a waterfall rather than a bag of numbers.
+        //
+        // The avatar legs are anchored on [TurnTrace.soundAtMs] rather than on the provider saying
+        // the lips had moved. Anchored on the claim these spans had a standard deviation of 272ms
+        // across twenty-five acoustic turns and formed two clusters; anchored on the sound, 67ms
+        // and one. The waterfall was showing a step in the pipeline that is not in the pipeline.
         open.leg(OP_LLM, from = 0, to = trace.firstTokenMs)
         open.leg(OP_LLM_REST, from = trace.firstTokenMs, to = trace.answerCompleteMs)
         open.leg(OP_TTS, from = trace.firstTokenMs, to = trace.firstAudioMs)
-        open.leg(OP_AVATAR, from = trace.firstAudioMs, to = trace.speakStartedMs)
-        open.leg(OP_SPEAKING, from = trace.speakStartedMs, to = trace.speakEndedMs)
+        open.leg(OP_UPLINK, from = trace.firstAudioMs, to = trace.frameSentMs)
+        open.leg(OP_AVATAR, from = trace.frameSentMs, to = trace.soundAtMs)
+        open.leg(OP_SPEAKING, from = trace.soundAtMs, to = trace.speakEndedMs)
 
         open.finish(turn.outcome.status())
     }
@@ -266,7 +264,8 @@ class SentryTurnSink : TurnSink {
         const val OP_LLM = "llm.first_token"
         const val OP_LLM_REST = "llm.generate"
         const val OP_TTS = "tts.first_audio"
-        const val OP_AVATAR = "avatar.to_lips"
+        const val OP_UPLINK = "avatar.encode"
+        const val OP_AVATAR = "avatar.to_sound"
         const val OP_SPEAKING = "avatar.speaking"
     }
 }
