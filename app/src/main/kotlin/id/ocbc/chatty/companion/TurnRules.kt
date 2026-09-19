@@ -1,5 +1,7 @@
 package id.ocbc.chatty.companion
 
+import id.ocbc.chatty.core.ai.telemetry.TurnOutcome
+
 /**
  * How a turn ends, as plain functions.
  *
@@ -13,6 +15,39 @@ package id.ocbc.chatty.companion
  * Nothing here touches Android, coroutines or a clock.
  */
 object TurnRules {
+
+    /**
+     * How this turn should be reported to whoever is collecting turns.
+     *
+     * # Why this is a rule rather than three lines at each call site
+     *
+     * Because there are two call sites — the turn that worked and the turn that did not — and the
+     * interesting cases live between them. An answer that arrived but was never spoken is a success
+     * to the customer reading it and a failure of the voice; a turn the customer cut short is not a
+     * failure at all, though it unwinds down the same path as one. Getting that wrong does not break
+     * anything, which is exactly why it would never be noticed: it quietly reports a pipeline that
+     * fails more, or less, than it really does.
+     *
+     * [interrupted] wins over everything. Barge-in ends a turn early by design, and whatever the
+     * avatar did or did not manage afterwards is not a fault worth counting.
+     *
+     * ```
+     * TurnRules.outcome(answered = true, spoke = false, interrupted = false, network = false)
+     * // ANSWERED_IN_TEXT — the customer got their answer, the face just never said it
+     * ```
+     */
+    fun outcome(
+        answered: Boolean,
+        spoke: Boolean,
+        interrupted: Boolean,
+        network: Boolean,
+    ): TurnOutcome = when {
+        interrupted -> TurnOutcome.INTERRUPTED
+        answered && spoke -> TurnOutcome.SPOKEN
+        answered -> TurnOutcome.ANSWERED_IN_TEXT
+        network -> TurnOutcome.FAILED_NETWORK
+        else -> TurnOutcome.FAILED_API
+    }
 
     /** What should happen to the caption that is still catching up with the voice. */
     enum class Captions {

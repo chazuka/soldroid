@@ -25,6 +25,17 @@ data class TurnTrace(
     /** Wall-clock start, so the marks below can be relative and therefore readable. */
     val askedAtMs: Long,
 
+    /**
+     * How long the recogniser took between the customer stopping and the question arriving.
+     *
+     * The only leg that happens *before* [askedAtMs], which is why it is a duration rather than a
+     * mark — and why it went unmeasured for so long. It is also the leg the customer feels most
+     * sharply in handsfree, where nobody let go of a button: a fixed silence has to elapse before
+     * the recogniser will call the sentence finished, and only then does any of the work below
+     * start. Null when the question was typed, which has no listening to do.
+     */
+    val listenedMs: Long? = null,
+
     /** The model's first fragment. This is the LLM's latency, and usually the largest single term. */
     val firstTokenMs: Long? = null,
 
@@ -58,6 +69,7 @@ data class TurnTrace(
 
     /** One line for a log or a debug overlay. Null marks render as `—`, never as `0`. */
     fun summary(): String = buildString {
+        listenedMs?.let { append("heard ").append(it.ms()).append("  ") }
         append("llm ").append(firstTokenMs.ms()).append('/').append(answerCompleteMs.ms())
         append("  tts ").append(firstAudioMs.ms())
         append("  lips ").append(speakStartedMs.ms()).append('/').append(speakEndedMs.ms())
