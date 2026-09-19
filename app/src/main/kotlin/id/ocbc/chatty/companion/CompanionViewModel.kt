@@ -89,6 +89,13 @@ data class CompanionUiState(
 
     /** The room is joined and a video track is arriving. False means captions carry the conversation. */
     val avatarLive: Boolean = false,
+
+    /**
+     * The avatar is audible right now, as the decoded audio reports it rather than as the provider
+     * claims. Handsfree will not open the microphone while this is true — see
+     * [id.ocbc.chatty.core.avatar.AvatarController.speaking].
+     */
+    val avatarSpeaking: Boolean = false,
     val muted: Boolean = false,
 
     /**
@@ -288,6 +295,9 @@ class CompanionViewModel @Inject constructor(
         }
         viewModelScope.launch {
             controller.audioMuted.collect { muted -> _state.update { it.copy(muted = muted) } }
+        }
+        viewModelScope.launch {
+            controller.speaking.collect { speaking -> _state.update { it.copy(avatarSpeaking = speaking) } }
         }
 
         // The notification's stop action is handled here, not on the screen.

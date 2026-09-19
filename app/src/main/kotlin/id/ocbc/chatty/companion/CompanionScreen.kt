@@ -403,7 +403,9 @@ private fun CompanionScreen(
     // Whether the microphone should be open at this instant. The agent speaks through the same
     // handset the microphone is in, so `acceptingInput` belongs in here rather than in a branch: the
     // microphone is shut for the whole of a turn, not merely not re-opened.
-    val wantsMic = state.handsfree && onStage && state.acceptingInput
+    // The avatar going quiet is a reason to re-evaluate, so it is part of the condition rather than
+    // something the effect would have to be woken for.
+    val wantsMic = state.handsfree && onStage && state.acceptingInput && !state.avatarSpeaking
 
     // Handsfree can be switched on before any question has ever been heard this session, when
     // `lastHeardAtMs` is still its initial zero. Reset it here so the quiet clock below starts
@@ -439,6 +441,7 @@ private fun CompanionScreen(
             on = state.handsfree,
             onStage = onStage,
             accepting = state.acceptingInput,
+            avatarSpeaking = state.avatarSpeaking,
             quietMs = System.currentTimeMillis() - lastHeardAtMs,
             retryDelayMs = micRetryDelayMs,
         )) {
