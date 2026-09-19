@@ -55,18 +55,30 @@ enum class Brain(
 
     companion object {
         /**
-         * The one every conversation starts on, so an untouched chooser behaves as it always did.
+         * The one every conversation starts on.
          *
-         * The first stack still [offered], which is [KAMARTAJ] in every ordinary build. Resolved
-         * rather than named so that switching a model off cannot leave the conversation pointed at
-         * something the chooser does not show — a selection with no segment to highlight, which
-         * reads as a broken control rather than a configured one.
+         * # Why this is [ANTHROPIC] rather than the first entry
+         *
+         * Measured on a Galaxy S25 over the same session: [ANTHROPIC] reached the avatar's lips at
+         * 2.5–2.9 s, [KAMARTAJ] at 8.8–15.4 s. Nobody demonstrating this app chooses the second
+         * number on purpose, and a default is what most people will ever see — so the default is
+         * the fast stack, and the comparison the chooser exists for starts from the good end.
+         *
+         * Still resolved rather than named outright. [offered] wins over this preference, so
+         * switching a model off cannot leave the conversation pointed at something the chooser does
+         * not show — a selection with no segment to highlight reads as a broken control rather than
+         * a configured one.
          *
          * Falls back to [KAMARTAJ] when every stack is switched off. Nothing is offered then and the
          * row is gone, but conversations still have to run on something, and the app's own API is
          * the only one guaranteed to be in the build.
+         *
+         * Being *offered* is not the same as being *reachable*: a build with no key for this stack
+         * does not construct it at all. [Brains.get] is where that is resolved, because only it
+         * knows which keys this APK was built with.
          */
-        val Default: Brain = entries.firstOrNull { it.offered } ?: KAMARTAJ
+        val Default: Brain =
+            ANTHROPIC.takeIf { it.offered } ?: entries.firstOrNull { it.offered } ?: KAMARTAJ
     }
 }
 
@@ -99,7 +111,25 @@ class Brains(private val clients: Map<Brain, ChatClient>) {
      */
     val available: List<Brain> get() = Brain.entries.filter { it.offered && it in clients }
 
-    /** The client for [brain], or the default's when this build has no key for it. */
+    /**
+     * Which brain a conversation should start on in *this* build.
+     *
+     * [Brain.Default] is a preference expressed in code; this is that preference reconciled with
+     * the keys the APK actually shipped with. A build with no key for the preferred stack falls to
+     * whatever is offered, and a build with nothing offered falls to the app's own API — which is
+     * always constructed, so this can never be empty.
+     */
+    val default: Brain
+        get() = Brain.Default.takeIf { it in clients } ?: available.firstOrNull() ?: Brain.KAMARTAJ
+
+    /**
+     * The client for [brain], or the build's [default] when this build has no key for it.
+     *
+     * Deliberately total. This used to fall back to `getValue(Brain.Default)`, which reads as safe
+     * and is not: the moment the preferred default is a stack some build has no key for, that call
+     * throws in the middle of a turn. [Brain.KAMARTAJ] is the last resort because the app's own API
+     * is the one client every build constructs.
+     */
     operator fun get(brain: Brain): ChatClient =
-        clients[brain] ?: clients.getValue(Brain.Default)
+        clients[brain] ?: clients[default] ?: clients.getValue(Brain.KAMARTAJ)
 }

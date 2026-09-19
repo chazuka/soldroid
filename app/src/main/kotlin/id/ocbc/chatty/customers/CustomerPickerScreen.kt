@@ -232,6 +232,17 @@ private fun Header(
             color = MaterialTheme.colorScheme.onSurfaceSecondary,
         )
 
+        // A selection this build cannot reach is corrected to one it can.
+        //
+        // The default is a preference written in code, and a build without a key for that stack
+        // does not construct it — so the held selection can name a model that is not in the row
+        // beside it. The control then highlights nothing, which reads as broken rather than as
+        // configured. Nudging it here keeps the correction in the one place that knows both the
+        // selection and what is actually on offer.
+        LaunchedEffect(state.brains, brain) {
+            if (state.brains.isNotEmpty() && brain !in state.brains) onBrainChange(state.brains.first())
+        }
+
         BrainPicker(available = state.brains, selected = brain, onSelect = onBrainChange)
 
         // The one place the network shows on this screen. A line rather than a spinner, because the
