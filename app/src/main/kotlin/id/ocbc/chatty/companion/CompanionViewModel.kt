@@ -462,6 +462,23 @@ class CompanionViewModel @Inject constructor(
         val pending = speculation
         val adopted = pending?.takeIf { TurnRules.sameQuestion(it.question, text) }
         if (adopted == null) discardSpeculation() else speculation = null
+        // Why a guess missed, without putting the customer's question in the log.
+        //
+        // Speculation is the largest lever this app has over a slow model, and on a handset it was
+        // missing every single time, which costs a billed request per turn and buys nothing. The
+        // two ways it can miss want opposite fixes: if the guess is a prefix of what was finally
+        // said, the guess was simply made too early and the delay should grow; if it is not, the
+        // recogniser revised words it had already emitted and no delay will help. Lengths and a
+        // prefix flag separate those two and carry none of the content.
+        if (pending != null && adopted == null) {
+            val guess = TurnRules.questionKey(pending.question)
+            val said = TurnRules.questionKey(text)
+            Log.i(
+                TAG,
+                "guess missed: guessed ${guess.length} chars, heard ${said.length}, " +
+                    "guess was ${if (said.startsWith(guess)) "cut short" else "revised"}",
+            )
+        }
         // Keyed on whether a speculation actually existed, not on how the question arrived. A
         // hold-to-talk question has a listening leg and no speculation, and reporting that as a
         // miss would invent a failure rate out of a path that never tried.
@@ -697,7 +714,14 @@ class CompanionViewModel @Inject constructor(
         // The label, not the enum. The same anonymity the chooser and the telemetry keep: a vendor
         // name here hands whoever is reading the traces a prior about which brain should be faster,
         // and comparing them without one is the reason these numbers are collected.
-        _state.value.trace?.let { Log.i(TAG, "turn ${_state.value.brain.label}: ${it.summary()}") }
+        // The speculation outcome rides on the same line as the timings, because it is the one
+        // thing that explains a first-token figure that would otherwise look impossible. Starting
+        // the model on a partial question is the largest lever this app has over a slow one, and
+        // whether it is paying off was previously visible only to the telemetry backend, which is
+        // no use at all while sitting in front of the handset watching a turn.
+        _state.value.trace?.let {
+            Log.i(TAG, "turn ${_state.value.brain.label}: ${it.summary()}  guess ${speculated.name.lowercase()}")
+        }
         recordTurn(
             TurnRules.outcome(
                 answered = text.isNotEmpty(),

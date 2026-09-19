@@ -970,17 +970,30 @@ private const val HANDSFREE_WATCHDOG_MS = 5_000L
 private const val HANDSFREE_SETTLE_MS = 1_200L
 
 /**
- * How much of the settle to spend before asking the model to start.
+ * How long the words must stop arriving before the model is started on the partial question.
  *
- * Long enough that someone drawing breath mid-sentence has not triggered it, short enough that the
- * remaining 800ms of pause — plus however long the recogniser takes to finalise — is spent with an
- * answer already being written rather than waiting to begin.
+ * # Why this is not as small as possible
  *
- * Getting it wrong is cheap in one direction and free in the other: too eager wastes a request,
+ * The point of speculating is lead time, so the instinct is to guess early, and this was 400ms.
+ * Measured acoustically on a handset it then produced a truncated guess on every single turn: 26
+ * characters against the 34 finally said, 25 against 31, 16 against 28, and every one discarded.
+ * A speculation that always misses is not a latency win, it is a billed request per turn bought in
+ * exchange for nothing.
+ *
+ * The cause is that partial results do not arrive evenly. They come in bursts with gaps between
+ * them comfortably longer than 400ms, so "no new words for 400ms" describes an ordinary pause
+ * inside a sentence rather than the end of one.
+ *
+ * Nine hundred is chosen against the other clock in this system: the recogniser ends the utterance
+ * by itself after `ENDPOINT_SILENCE_MS`, 1,500ms of real silence. Guessing at 900ms still buys most
+ * of a second of lead, and buys it on a question far more likely to be whole. Raising it further
+ * converges on never speculating at all; lowering it is what was measured and does not work.
+ *
+ * Getting it wrong stays cheap in one direction and free in the other: too eager wastes a request,
  * too late merely speculates less often. It can never produce an answer to the wrong question,
  * because the finished transcript still has to agree before a word of it is used.
  */
-private const val HANDSFREE_SPECULATE_AFTER_MS = 400L
+private const val HANDSFREE_SPECULATE_AFTER_MS = 900L
 
 /** The longest a single handsfree listen may run before it is closed and retried. */
 private const val HANDSFREE_MAX_LISTEN_MS = 15_000L
