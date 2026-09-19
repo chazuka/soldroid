@@ -286,6 +286,9 @@ class CompanionViewModel @Inject constructor(
             brains[brain].warm(agent.id)
             warmed = true
         }
+        // The synthesizer's connection, opened while the screen is still settling rather than
+        // inside the silence of the first answer. See [SpeechSynthesizer.warm].
+        viewModelScope.launch { runCatching { synthesizer.warm() } }
         startRefreshWatchdog(agent)
     }
 
