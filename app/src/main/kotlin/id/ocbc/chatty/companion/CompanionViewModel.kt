@@ -323,7 +323,18 @@ class CompanionViewModel @Inject constructor(
                 // has been observed arriving before the lips moved; this one comes off the media
                 // path, so it is the check on the rest. Guarded by the turn so the greeting and any
                 // stray speaker change outside a turn cannot claim it.
-                if (speaking && turnInFlight) mark { copy(audibleMs = audibleMs ?: elapsed()) }
+                if (speaking && turnInFlight) {
+                    mark { copy(audibleMs = audibleMs ?: elapsed()) }
+                    // Whichever of the two arrives first starts the caption.
+                    //
+                    // It used to wait on the provider's speak_started alone, and across twenty-five
+                    // acoustic turns that event landed *after* sound was already in the room on
+                    // eight of them, by 366ms to 2,001ms. On those turns the words trailed the
+                    // voice by up to two seconds, which is the exact desync the reveal exists to
+                    // prevent, arriving through the signal meant to prevent it. Completing is
+                    // idempotent, so whichever fires second is a no-op.
+                    this@CompanionViewModel.speaking?.complete(Unit)
+                }
                 _state.update { it.copy(avatarSpeaking = speaking) }
             }
         }
@@ -917,11 +928,17 @@ class CompanionViewModel @Inject constructor(
      * have to follow the words actually being spoken. That correction stays down here; one question
      * asked in English is not a request to rewrite every button in the app.
      *
-     * Ignored mid-turn, as the toggle was: the voice is resolved when a turn starts, so changing it
-     * while the avatar is speaking would only confuse the next question.
+     * Accepted at any time, including mid-answer.
+     *
+     * It used to be dropped while a turn was in flight, on the reasoning that the voice is already
+     * resolved by then. The reasoning was right and the behaviour was still wrong: the turn captures
+     * its own language when it starts, so a change can only ever affect the *next* question, and
+     * refusing it bought nothing while costing the one thing a bank's app cannot afford. A customer
+     * who taps EN during a long answer got no switch, no message and no sign the tap had registered,
+     * and the natural reading of that is that the control is broken. Found by tapping it eleven
+     * seconds into a session, while the greeting was still playing, and watching nothing happen.
      */
     fun setLanguage(language: Language) {
-        if (!_state.value.acceptingInput) return
         // An explicit choice moves the ear at once and with no streak to serve out. The customer
         // said which language they are about to speak; there is nothing left to infer.
         offLanguageStreak = 0
