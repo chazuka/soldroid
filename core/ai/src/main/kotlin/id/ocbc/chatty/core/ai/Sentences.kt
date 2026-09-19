@@ -60,7 +60,9 @@ fun Flow<String>.sentences(
         while (true) {
             val floor = if (emittedAny) minChars else firstChunkMinChars
             val terminators = if (emittedAny) SENTENCE_TERMINATORS else FIRST_CHUNK_TERMINATORS
-            val end = buffer.chunkEnd(floor, terminators) ?: break
+            val end = buffer.chunkEnd(floor, terminators)
+                ?: buffer.figureBreak(floor).takeIf { !emittedAny && it != null }
+                ?: break
             val sentence = buffer.substring(0, end).trim()
             buffer.delete(0, end)
             if (sentence.isNotEmpty()) {
@@ -92,6 +94,37 @@ private fun CharSequence.chunkEnd(minChars: Int, terminators: String): Int? {
     return null
 }
 
+/**
+ * The index just past a completed figure, or null while none has finished.
+ *
+ * # Why the opening chunk breaks on a number and nothing else does
+ *
+ * Punctuation is what makes a chunk sayable, so everywhere else the splitter waits for it. The
+ * opening chunk cannot afford to: measured on real answers, the first comma or dash lands between
+ * 31 and 54 characters in, and every one of those is the customer sitting in silence watching a
+ * face that has not moved. Lowering the *floor* does nothing about it — a floor only matters when
+ * a boundary arrives early, and one never does.
+ *
+ * Breaking at any old word was the obvious alternative and it sounded wrong: it produced
+ * "Saldo kamu Rp3.240.000 saat" followed by "ini.", splitting a fixed phrase down the middle, and
+ * a fragment is read with the falling tone of a finished sentence. A figure is different. These
+ * answers are instructed to lead with one, a speaker pauses after saying a number anyway, and it
+ * is the one place a break lands where a person would have put one.
+ *
+ * The digits must be followed by whitespace, which is what keeps a figure whole: `Rp3.240.000` has
+ * no space in it, so this can never hand the number speller half of one.
+ */
+private fun CharSequence.figureBreak(minChars: Int): Int? {
+    for (i in indices) {
+        if (!this[i].isDigit()) continue
+        val next = getOrNull(i + 1) ?: return null
+        if (!next.isWhitespace()) continue
+        if (i + 1 < minChars) continue
+        return i + 1
+    }
+    return null
+}
+
 private fun CharSequence.getOrNull(index: Int): Char? = if (index in indices) this[index] else null
 
 private const val SENTENCE_TERMINATORS = ".!?…\n"
@@ -114,3 +147,5 @@ private const val DEFAULT_MIN_SENTENCE_CHARS = 24
  * the customer waits for in silence, but not so low that the avatar opens with two words.
  */
 private const val DEFAULT_FIRST_CHUNK_MIN_CHARS = 18
+
+

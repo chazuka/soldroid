@@ -2,6 +2,7 @@ package id.ocbc.chatty.core.ai
 
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -108,4 +109,47 @@ class SentencesTest {
     }
 
     private fun List<String>.asFlowOfChunks() = flowOf(*toTypedArray())
+
+    @Test
+    fun `the opening chunk breaks after a figure rather than waiting for punctuation`() = runTest {
+        // The shape the prompt asks for: lead with the number, then explain it. Waiting for the
+        // comma would hold the first sound back by another 27 characters of silence.
+        val chunks = "Total sekitar Rp400.800.000 tersebar di rekening gaji, dana liburan."
+            .asCharacterStream().sentences().toList()
+
+        assertEquals("Total sekitar Rp400.800.000", chunks.first())
+    }
+
+    @Test
+    fun `a figure is never split down the middle`() = runTest {
+        // The break only lands after whitespace, and a figure contains none. Handing half of
+        // "Rp3.240.000" to the number speller would say something that is not the balance.
+        val chunks = "Saldo kamu Rp3.240.000 saat ini. Naik sedikit.".asCharacterStream().sentences().toList()
+
+        assertEquals("Saldo kamu Rp3.240.000", chunks.first())
+        assertTrue(chunks.none { it.endsWith("Rp3.") || it.startsWith("240") })
+    }
+
+    @Test
+    fun `a figure too early to be worth saying is passed over`() = runTest {
+        // Below the floor the chunk would be two words, which is an avatar clearing its throat
+        // rather than answering. The next boundary is taken instead.
+        val chunks = "Ada 3 produk yang cocok untukmu, dan semuanya likuid."
+            .asCharacterStream().sentences().toList()
+
+        assertTrue(chunks.first().length >= 18, "opened with: ${chunks.first()}")
+    }
+
+    @Test
+    fun `only the opening chunk breaks on a figure`() = runTest {
+        // Everything after the first is spoken while the avatar is already talking, so it can
+        // afford to wait for punctuation — and punctuation is what gives it intonation.
+        val chunks = "Halo, ini ringkasannya. Saldo kamu Rp3.240.000 saat ini dan stabil."
+            .asCharacterStream().sentences().toList()
+
+        assertTrue(chunks.drop(1).none { it.trimEnd().last().isDigit() }, "chunks: $chunks")
+    }
+
+    /** One character at a time: the worst case, and the closest to how tokens actually arrive. */
+    private fun String.asCharacterStream() = flow { forEach { emit(it.toString()) } }
 }
