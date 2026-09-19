@@ -10,7 +10,9 @@ import io.livekit.android.LiveKit
 import io.livekit.android.LiveKitOverrides
 import io.livekit.android.RoomOptions
 import io.livekit.android.audio.NoAudioHandler
+import android.util.Log
 import io.livekit.android.events.RoomEvent
+import io.livekit.android.room.participant.ConnectionQuality
 // `Room.events` is an EventListenable, not a Flow; its `collect` is an extension.
 import io.livekit.android.events.collect
 import io.livekit.android.renderer.TextureViewRenderer
@@ -31,6 +33,24 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** What the companion screen needs to know about the face. */
+/** The tag the rest of the avatar code already logs under, so one filter shows the whole path. */
+private const val TAG = "chatty.avatar"
+
+/** How well the room is holding up, as the server rates it. */
+enum class AvatarConnection {
+    /** No rating yet, which is the state before the first report and after a teardown. */
+    UNKNOWN,
+
+    /** Comfortable. */
+    GOOD,
+
+    /** Degraded but connected: the picture and the voice are arriving late or incomplete. */
+    POOR,
+
+    /** Gone. */
+    LOST,
+}
+
 sealed interface AvatarEvent {
     /** The room is joined and the avatar's video track is subscribed. */
     data object Attached : AvatarEvent
@@ -71,6 +91,26 @@ interface AvatarController {
      * to err on when the question is "has it stopped talking yet".
      */
     val speaking: StateFlow<Boolean>
+
+    /**
+     * The room has dropped and is trying to come back.
+     *
+     * # Why this has to be visible
+     *
+     * A reconnect looks like nothing at all: the last video frame stays on screen, so the avatar
+     * sits there mid-expression while the app carries on as though it were listening. Handsfree
+     * keeps the microphone open into a room that cannot hear it, and the customer keeps talking to
+     * a picture. Both are worth knowing about — the screen can say so, and the microphone can wait.
+     */
+    val reconnecting: StateFlow<Boolean>
+
+    /**
+     * How the connection to the room is holding up, as the server rates it.
+     *
+     * Not shown to the customer. It is here so that a slow turn can be told apart from a slow
+     * network after the fact — without it, every complaint about lag looks the same in the data.
+     */
+    val connection: StateFlow<AvatarConnection>
 
     /**
      * Silence (or restore) the avatar's voice on this device only.
@@ -166,6 +206,12 @@ class LiveKitAvatarController(
 
     private val _speaking = MutableStateFlow(false)
     override val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+
+    private val _reconnecting = MutableStateFlow(false)
+    override val reconnecting: StateFlow<Boolean> = _reconnecting.asStateFlow()
+
+    private val _connection = MutableStateFlow(AvatarConnection.UNKNOWN)
+    override val connection: StateFlow<AvatarConnection> = _connection.asStateFlow()
 
     // The avatar's remote audio, held only to gate local playout. The room subscribes regardless;
     // muting flips the underlying rtc track's enabled flag, which stops playout without touching
@@ -303,6 +349,8 @@ class LiveKitAvatarController(
                 // The face must not freeze on the last decoded frame.
                 _videoTrack.value = null
                 _speaking.value = false
+                _reconnecting.value = false
+                _connection.value = AvatarConnection.UNKNOWN
                 _events.tryEmit(AvatarEvent.Failed(e.message ?: "connect failed"))
             }
         }
@@ -342,9 +390,35 @@ class LiveKitAvatarController(
             // the only participant that can make a sound is the one it came to listen to.
             is RoomEvent.ActiveSpeakersChanged -> _speaking.value = event.speakers.isNotEmpty()
 
+            // A reconnect leaves the last frame on screen, so without this the avatar just appears
+            // to freeze mid-expression while everything carries on around it.
+            is RoomEvent.Reconnecting -> {
+                Log.i(TAG, "room is reconnecting")
+                _reconnecting.value = true
+                // Nothing can be audible through a room that is not connected, and leaving this
+                // set would hold the microphone shut for as long as the reconnect took.
+                _speaking.value = false
+            }
+
+            is RoomEvent.Reconnected -> {
+                Log.i(TAG, "room reconnected")
+                _reconnecting.value = false
+            }
+
+            is RoomEvent.ConnectionQualityChanged -> {
+                _connection.value = when (event.quality) {
+                    ConnectionQuality.EXCELLENT, ConnectionQuality.GOOD -> AvatarConnection.GOOD
+                    ConnectionQuality.POOR -> AvatarConnection.POOR
+                    ConnectionQuality.LOST -> AvatarConnection.LOST
+                    else -> AvatarConnection.UNKNOWN
+                }
+            }
+
             is RoomEvent.Disconnected -> {
                 _videoTrack.value = null
                 _speaking.value = false
+                _reconnecting.value = false
+                _connection.value = AvatarConnection.UNKNOWN
                 // A disconnect we asked for is not a failure; `detach()` nulls the track first.
                 event.error?.let { _events.tryEmit(AvatarEvent.Failed(it.message ?: "disconnected")) }
             }
@@ -352,6 +426,8 @@ class LiveKitAvatarController(
             is RoomEvent.FailedToConnect -> {
                 _videoTrack.value = null
                 _speaking.value = false
+                _reconnecting.value = false
+                _connection.value = AvatarConnection.UNKNOWN
                 _events.tryEmit(AvatarEvent.Failed(event.error.message ?: "failed to connect"))
             }
 

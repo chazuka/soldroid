@@ -44,6 +44,7 @@ object Handsfree {
         onStage: Boolean,
         accepting: Boolean,
         avatarSpeaking: Boolean,
+        reconnecting: Boolean,
         quietMs: Long,
         retryDelayMs: Long,
     ): Intent = when {
@@ -54,7 +55,10 @@ object Handsfree {
         // utterance is over, and that has been observed arriving while the avatar is plainly still
         // talking; this comes from the decoded audio instead, so it cannot be early. Without it the
         // microphone opened into the tail of an answer and the agent started interviewing itself.
-        !on || !onStage || !accepting || avatarSpeaking -> Intent.Close
+        // [reconnecting] closes it for a different reason than the rest: nothing said into a room
+        // that has dropped can reach anyone, so listening is only a way to collect a question that
+        // will be answered by a face which is currently a still image.
+        !on || !onStage || !accepting || avatarSpeaking || reconnecting -> Intent.Close
         quietMs > QUIET_MS -> Intent.GiveUp
         else -> Intent.Listen(REARM_MS + retryDelayMs)
     }
