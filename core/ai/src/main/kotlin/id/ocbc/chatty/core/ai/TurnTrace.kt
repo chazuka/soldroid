@@ -67,6 +67,35 @@ data class TurnTrace(
     /** True once the avatar has finished; a trace stops changing here. */
     val complete: Boolean get() = speakEndedMs != null
 
+    /**
+     * How long synthesis took to produce something sayable, once the model had given it words.
+     *
+     * Derived rather than marked, because there is no separate clock to start: the synthesizer is
+     * handed the first clause the moment one is complete, so the gap between the model's first
+     * token and the first audio frame *is* the synthesis leg plus this app's own clause splitting.
+     *
+     * Null until both ends exist. A turn that failed before any audio has no synthesis leg, and
+     * reporting zero would put it in the same bucket as an instant one.
+     */
+    val ttsMs: Long? get() = both(firstTokenMs, firstAudioMs)
+
+    /**
+     * How long the provider took to turn audio into a moving mouth.
+     *
+     * The leg this app does not control and, on the evidence, the one that varies most. Measured on
+     * a Galaxy S25: 0.86s and 0.95s on turns answered by [Brain.ANTHROPIC], against 4.4s and 6.4s on
+     * turns answered by [Brain.KAMARTAJ] in the same sitting. Why a provider that is handed audio
+     * the same way either time should take five times longer is not something this app can see from
+     * the outside, which is the reason to keep measuring it. It is derived for the
+     * same reason [ttsMs] is — the audio is handed over continuously, so the gap between the first
+     * frame sent and the provider reporting lips is the whole of its render latency.
+     */
+    val avatarMs: Long? get() = both(firstAudioMs, speakStartedMs)
+
+    /** The span between two marks, or null unless both happened in that order. */
+    private fun both(from: Long?, to: Long?): Long? =
+        if (from != null && to != null && to >= from) to - from else null
+
     /** One line for a log or a debug overlay. Null marks render as `—`, never as `0`. */
     fun summary(): String = buildString {
         listenedMs?.let { append("heard ").append(it.ms()).append("  ") }

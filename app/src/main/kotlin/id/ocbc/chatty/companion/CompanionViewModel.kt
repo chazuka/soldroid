@@ -513,14 +513,22 @@ class CompanionViewModel @Inject constructor(
     private fun recordTurn(outcome: TurnOutcome) {
         val state = _state.value
         val trace = state.trace ?: return
+        val agent = state.agent
         turns.record(
             TurnEvent(
                 trace = trace,
                 brain = state.brain.name,
-                agent = state.agent?.id.orEmpty(),
+                agent = agent?.id.orEmpty(),
                 language = state.language.tag,
+                // Resolved the same way the turn resolved it, so the dimension names the voice that
+                // actually spoke rather than the one the switch happens to point at now.
+                voice = agent?.avatar?.voiceFor(state.language).orEmpty(),
                 handsfree = state.handsfree,
                 warmHit = warmed,
+                // The answer as the customer received it, which is the length synthesis was paid
+                // for. Only its size travels — never a character of it.
+                answerChars = state.transcript.lastOrNull()
+                    ?.takeIf { it.speaker == Speaker.AGENT }?.text?.length ?: 0,
                 outcome = outcome,
             ),
         )

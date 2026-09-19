@@ -52,6 +52,22 @@ data class TurnEvent(
     /** The language the answer was spoken in. */
     val language: String,
 
+    /**
+     * Which voice said it, as the synthesizer's own id.
+     *
+     * The vendor's identifier rather than a friendlier label, and deliberately: a label built from
+     * the persona and the language cannot identify a voice, because personas that fall back to the
+     * default profile share one — they would read as several voices while being one. The id groups
+     * correctly, and it is the value you can paste back into the provider to hear what you are
+     * looking at.
+     *
+     * It is also the value [id.ocbc.chatty.core.ai.telemetry.scrubUrl] strips out of URLs. That is
+     * not a contradiction: there it is an identifier leaking into an address nobody chose, here it
+     * is a dimension someone asked for. A voice is a property of the configuration, not of the
+     * customer.
+     */
+    val voice: String,
+
     /** Whether the microphone re-armed itself, because handsfree turns carry the endpointing wait. */
     val handsfree: Boolean,
 
@@ -63,6 +79,16 @@ data class TurnEvent(
      * only on the bench where it was measured.
      */
     val warmHit: Boolean,
+
+    /**
+     * How long the answer was, in characters.
+     *
+     * Present so that comparing voices, or models, means something. Synthesis time scales with how
+     * much text there is, so ranking voices on raw latency mostly ranks how talkative the model
+     * happened to be on those turns. Without a length to divide by, that comparison is noise
+     * wearing a chart.
+     */
+    val answerChars: Int,
 
     val outcome: TurnOutcome,
 )
