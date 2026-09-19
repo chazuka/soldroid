@@ -45,6 +45,7 @@ object Handsfree {
         accepting: Boolean,
         avatarSpeaking: Boolean,
         reconnecting: Boolean,
+        avatarOpening: Boolean,
         quietMs: Long,
         retryDelayMs: Long,
     ): Intent = when {
@@ -58,6 +59,11 @@ object Handsfree {
         // [reconnecting] closes it for a different reason than the rest: nothing said into a room
         // that has dropped can reach anyone, so listening is only a way to collect a question that
         // will be answered by a face which is currently a still image.
+        // [avatarOpening] closes it for a third reason, and this one is about the microphone rather
+        // than the answer. Standing up a provider session negotiates a WebRTC connection, and on a
+        // handset that contends with whoever is holding the audio input: a listen that began 670ms
+        // into a 1,911ms session open died 56ms later with ERROR_CLIENT, which then costs a recovery
+        // backoff on top. Waiting out the open is cheaper than the failure it avoids.
         // Each reason is named rather than collapsed into one branch. "Handsfree is on and the
         // microphone is not listening" has been reported four separate times, each a different
         // cause, and every time the first question was which one — a log that says only "closed"
@@ -67,6 +73,7 @@ object Handsfree {
         !accepting -> Intent.Close("a turn is in flight")
         avatarSpeaking -> Intent.Close("the avatar is still audible")
         reconnecting -> Intent.Close("the room is reconnecting")
+        avatarOpening -> Intent.Close("the avatar session is being opened")
         quietMs > QUIET_MS -> Intent.GiveUp
         else -> Intent.Listen(REARM_MS + retryDelayMs)
     }

@@ -20,7 +20,9 @@ import livekit.org.webrtc.EglBase
 import livekit.org.webrtc.RendererCommon
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.AudioTrack
+import io.livekit.android.room.track.RemoteAudioTrack
 import io.livekit.android.room.track.VideoTrack
+import livekit.org.webrtc.AudioTrackSink
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -213,6 +215,26 @@ class LiveKitAvatarController(
     private val _connection = MutableStateFlow(AvatarConnection.UNKNOWN)
     override val connection: StateFlow<AvatarConnection> = _connection.asStateFlow()
 
+    /**
+     * Hears the avatar directly, because the room will not say.
+     *
+     * See [RoomLoudness] for why the SDK's own active-speaker event is not used: it needs the server
+     * to send a speaker list, LiveAvatar's does not, and the flag it was driving is the one that
+     * keeps the microphone shut while the agent is talking.
+     */
+    private val loudness = RoomLoudness()
+
+    /**
+     * Runs on WebRTC's audio thread. It must stay cheap and it must not block, because this is the
+     * thread feeding the speaker; [RoomLoudness.feed] returns only on a transition so the hundred
+     * buffers a second that change nothing cost one comparison each.
+     */
+    private val loudnessSink = AudioTrackSink { audio, bits, rate, channels, frames, _ ->
+        if (loudness.feed(audio, bits, rate, channels, frames)) {
+            _speaking.value = loudness.speaking
+        }
+    }
+
     // The avatar's remote audio, held only to gate local playout. The room subscribes regardless;
     // muting flips the underlying rtc track's enabled flag, which stops playout without touching
     // the subscription or the utterance.
@@ -375,6 +397,7 @@ class LiveKitAvatarController(
                 }
                 is AudioTrack -> {
                     audioTrack = track
+                    listenForSound(track)
                     applyAudioMute()
                 }
                 else -> Unit
@@ -382,13 +405,8 @@ class LiveKitAvatarController(
 
             is RoomEvent.TrackUnsubscribed -> {
                 if (event.track === _videoTrack.value) _videoTrack.value = null
-                _speaking.value = false
-                if (event.track === audioTrack) audioTrack = null
+                if (event.track === audioTrack) stopListeningForSound()
             }
-
-            // Anyone audible in this room is the avatar: this app never publishes a microphone, so
-            // the only participant that can make a sound is the one it came to listen to.
-            is RoomEvent.ActiveSpeakersChanged -> _speaking.value = event.speakers.isNotEmpty()
 
             // A reconnect leaves the last frame on screen, so without this the avatar just appears
             // to freeze mid-expression while everything carries on around it.
@@ -485,11 +503,35 @@ class LiveKitAvatarController(
         audioManager.abandonAudioFocusRequest(focusRequest)
         focusLost = false
         _videoTrack.value = null
-                _speaking.value = false
-        audioTrack = null
+        stopListeningForSound()
         _audioMuted.value = false
         // Guarded: after a terminal release() the room is disposed, and touching it would fault.
         if (!released) room.disconnect()
+    }
+
+    /**
+     * Starts reading the avatar's audio so [speaking] can be answered from it.
+     *
+     * Only a [RemoteAudioTrack] can be read this way, and only a remote one ever arrives here, since
+     * this app never publishes. A local track would silently deliver nothing, so the type is checked
+     * rather than cast and the miss is logged: a quiet failure here disables a safety feature
+     * without disabling anything visible.
+     */
+    private fun listenForSound(track: AudioTrack) {
+        if (track !is RemoteAudioTrack) {
+            Log.w(TAG, "audio track is not remote; cannot tell when the avatar is speaking")
+            return
+        }
+        loudness.reset()
+        _speaking.value = false
+        track.addSink(loudnessSink)
+    }
+
+    private fun stopListeningForSound() {
+        (audioTrack as? RemoteAudioTrack)?.removeSink(loudnessSink)
+        audioTrack = null
+        loudness.reset()
+        _speaking.value = false
     }
 
     override fun release() {
