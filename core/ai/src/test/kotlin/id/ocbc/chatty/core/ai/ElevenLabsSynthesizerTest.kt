@@ -112,6 +112,27 @@ class ElevenLabsSynthesizerTest {
         assertTrue(!body.contains("3.240.000"))
     }
 
+    @Test
+    fun `warming opens a connection and asks for nothing expensive`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """{"models":[]}"""))
+
+        synthesizer.warm()
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertTrue(request.target.startsWith("/v1/models"))
+        assertEquals("test-key", request.headers["xi-api-key"])
+    }
+
+    @Test
+    fun `a refused warm-up is not a failure`() = runTest {
+        // The connection it could not open is opened by the turn that needs it, so a provider
+        // having a bad minute here must never surface anywhere.
+        server.enqueue(MockResponse(code = 500, body = "nope"))
+
+        synthesizer.warm()
+    }
+
     private fun pcmResponse(bytes: Int) =
         MockResponse.Builder().code(200).body(Buffer().write(ByteArray(bytes))).build()
 }

@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -35,6 +36,27 @@ interface SpeechSynthesizer {
      * [spokenForm].
      */
     fun speak(voiceId: String, text: String, language: Language): Flow<ByteArray>
+
+    /**
+     * Opens the connection this synthesizer will need, before a turn needs it.
+     *
+     * # Why this is worth a call of its own
+     *
+     * The first request to a host pays for DNS, the TCP handshake and the TLS negotiation, and on a
+     * handset over mobile data that is a few hundred milliseconds. Paid inside a turn it lands in
+     * the silence the customer is already sitting in; paid when the conversation opens it lands
+     * while they are still reading the screen and the avatar session is being negotiated, which is
+     * time being spent anyway.
+     *
+     * The shape of the evidence: the first answer of a conversation was consistently slower than
+     * the ones after it — 1376ms to first token against 1044-1270ms — with nothing else different
+     * between them.
+     *
+     * Best-effort by contract: a failure here must not fail anything, because the connection it
+     * could not open will simply be opened by the turn that needs it. Defaults to doing nothing,
+     * for implementations with no connection to warm.
+     */
+    suspend fun warm() = Unit
 }
 
 /**
@@ -116,6 +138,26 @@ class ElevenLabsSynthesizer(
             if (total == 0L) throw SynthesisException("text-to-speech returned no audio")
         }
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Opens a connection to the synthesis host by asking it something trivial.
+     *
+     * `/v1/models` is a listing this app never reads: it is the cheapest authenticated GET the
+     * provider offers, it bills nothing, and what it returns is thrown away. The point is the
+     * connection it leaves behind in OkHttp's pool, which the first synthesis of the conversation
+     * then reuses instead of negotiating its own.
+     */
+    override suspend fun warm() {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val request = Request.Builder()
+                    .url("$baseUrl/v1/models")
+                    .header("xi-api-key", apiKey)
+                    .build()
+                calls.newCall(request).execute().use { it.body.bytes() }
+            }
+        }
+    }
 
     companion object {
         const val ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
