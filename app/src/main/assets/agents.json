@@ -1,31 +1,31 @@
 {
   "default": {
-    "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
+    "avatar_id": "5c6e2257-bb91-48f4-a75d-d4c9ad212af9",
     "voices": {
-      "id": "TrU3igk19A4aIUi2GAA2",
-      "en": "EXAVITQu4vr4xnSDxMaL"
+      "id": "QLAlOeRuLwKX0skeTR7R",
+      "en": "QLAlOeRuLwKX0skeTR7R"
     }
   },
   "overrides": {
     "alvin": {
       "avatar_id": "90a94dae-8df2-4b12-99a8-5bbc34c9551e",
       "voices": {
-        "id": "5YVVTVlHuEcIu0JBLbEF",
-        "en": "cjVigY5qzO86Huf0OWal"
+        "id": "UgBBYS2sOqTuMpoF3BR0",
+        "en": "UgBBYS2sOqTuMpoF3BR0"
       }
     },
     "emma": {
       "avatar_id": "5c6e2257-bb91-48f4-a75d-d4c9ad212af9",
       "voices": {
-        "id": "TrU3igk19A4aIUi2GAA2",
-        "en": "cgSgspJ2msm6clMCkdW9"
+        "id": "QLAlOeRuLwKX0skeTR7R",
+        "en": "QLAlOeRuLwKX0skeTR7R"
       }
     },
     "ayu": {
       "avatar_id": "f0953388-a391-4518-945b-f2db3b602e77",
       "voices": {
-        "id": "19zQpXlAQKHlcmXgXfLr",
-        "en": "EXAVITQu4vr4xnSDxMaL"
+        "id": "yK2Ny0mq8WplixhD1td3",
+        "en": "yK2Ny0mq8WplixhD1td3"
       }
     }
   }

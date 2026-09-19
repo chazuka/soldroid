@@ -43,7 +43,18 @@ enum class TurnOutcome {
 data class TurnEvent(
     val trace: TurnTrace,
 
-    /** Which stack answered — the comparison the whole app exists to run. */
+    /**
+     * Which stack answered — the comparison the whole app exists to run.
+     *
+     * The stack's anonymous label ("Model 1", "Model 2"), never the vendor behind it. The labels
+     * are anonymous on the screen so that whoever is judging an answer judges the answer; a chart
+     * grouped by brand would hand back the prior that the screen was built to withhold, to the
+     * people most likely to be forming a view.
+     *
+     * This does not make the trace vendor-blind, and is not meant to: the HTTP spans beside it name
+     * the hosts they called, which is exactly how "the model was slow" is told apart from "the
+     * handshake was slow". What it changes is the dimension everything is grouped and reported by.
+     */
     val brain: String,
 
     /** The persona, which is a demo character rather than a person. */
