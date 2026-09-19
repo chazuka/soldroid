@@ -731,6 +731,16 @@ private fun Exchange(
     //
     // Reading the whole answer is what [CompanionMode.TEXT] is for, and it is one tap away.
 
+    // One size for both voices. They had different ones — the question set in a title style and the
+    // answer in a body style — which read as two kinds of thing on a surface that now shows one
+    // line at a time, and made the customer's words look like a heading over the agent's. Who is
+    // speaking is carried by the quotes and the dimming, which is enough.
+    val captionStyle = if (mode == CompanionMode.VIDEO) {
+        MaterialTheme.typography.titleMedium
+    } else {
+        MaterialTheme.typography.titleLarge
+    }
+
     Column(
         // No scroll container and no fading edges: clamped text cannot overflow, so both were
         // paying for an affordance nothing needed — the fade masks through an offscreen layer every
@@ -740,17 +750,12 @@ private fun Exchange(
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         AnimatedVisibility(visible = spoken?.byCustomer == true, enter = fadeIn(), exit = fadeOut()) {
-            val questionStyle = if (mode == CompanionMode.VIDEO) {
-                MaterialTheme.typography.titleLarge
-            } else {
-                MaterialTheme.typography.headlineSmall
-            }
             TailText(
                 // Quoted, because on a surface that shows one line at a time the quotes are what
                 // say whose words these are.
                 text = AnnotatedString("“${spoken?.text.orEmpty()}”"),
                 maxLines = CAPTION_MAX_LINES,
-                style = questionStyle,
+                style = captionStyle,
                 color = Color.White,
                 // Dimmed while it is still being heard: unfinished words, not yet a question.
                 modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
@@ -767,13 +772,8 @@ private fun Exchange(
         }
         AnimatedVisibility(visible = spoken?.byCustomer == false, enter = fadeIn(), exit = fadeOut()) {
             val body = streamingText(spoken?.text.orEmpty(), streaming = streaming)
-            val answerStyle = if (mode == CompanionMode.VIDEO) {
-                MaterialTheme.typography.bodyMedium
-            } else {
-                MaterialTheme.typography.bodyLarge
-            }
             val answerColor = Color.White.copy(alpha = ANSWER_ALPHA)
-            TailText(text = body, maxLines = CAPTION_MAX_LINES, style = answerStyle, color = answerColor)
+            TailText(text = body, maxLines = CAPTION_MAX_LINES, style = captionStyle, color = answerColor)
         }
         // The turn failed and produced nothing. On the stage there is no thread to fall back on, so
         // the way out has to be here or the customer is left looking at a face that said nothing.
