@@ -74,54 +74,6 @@ import kotlinx.coroutines.launch
  */
 
 /**
- * What the companion is doing right now, as the design's outlined pill.
- *
- * A dot carries the state at a glance and the word carries it for anyone who cannot use colour. The
- * dot breathes only while something is actually happening — a pulsing "ready" is noise, and noise
- * that never stops is the fastest way to make a screen tiring.
- */
-@Composable
-fun StatusPill(phase: TurnPhase, listening: Boolean, modifier: Modifier = Modifier) {
-    val (dot, label) = when {
-        listening -> StageColors.listening to R.string.phase_listening
-        phase == TurnPhase.THINKING -> StageColors.thinking to R.string.phase_thinking
-        phase == TurnPhase.SPEAKING -> StageColors.speaking to R.string.phase_speaking
-        else -> StageColors.idle to R.string.phase_idle
-    }
-
-    val calm = rememberReducedMotion()
-    val active = (listening || phase != TurnPhase.IDLE) && !calm
-    val pulse = rememberInfiniteTransition(label = "status")
-    val scale by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = if (active) DOT_PULSE_SCALE else 1f,
-        animationSpec = infiniteRepeatable(tween(DOT_PULSE_MS), RepeatMode.Reverse),
-        label = "dot",
-    )
-
-    Surface(
-        shape = CircleShape,
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = GLASS_STROKE_ALPHA)),
-        modifier = modifier,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(DOT_SIZE).scale(scale).clip(CircleShape).background(dot))
-            Spacer(Modifier.width(Spacing.sm))
-            Text(
-                text = stringResource(label),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = OVER_PHOTO_MUTED_ALPHA),
-            )
-        }
-    }
-}
-
-/**
  * Hold to talk.
  *
  * Press starts the recogniser, release asks it for what it heard — the same contract as a walkie

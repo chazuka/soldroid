@@ -21,8 +21,8 @@ object Handsfree {
         /** Open it, after [delayMs]. */
         data class Listen(val delayMs: Long) : Intent
 
-        /** Close it and leave it closed. */
-        data object Close : Intent
+        /** Close it and leave it closed. [because] is for the log, never for the customer. */
+        data class Close(val because: String) : Intent
 
         /** Switch handsfree off and tell the customer why. */
         data object GiveUp : Intent
@@ -58,7 +58,15 @@ object Handsfree {
         // [reconnecting] closes it for a different reason than the rest: nothing said into a room
         // that has dropped can reach anyone, so listening is only a way to collect a question that
         // will be answered by a face which is currently a still image.
-        !on || !onStage || !accepting || avatarSpeaking || reconnecting -> Intent.Close
+        // Each reason is named rather than collapsed into one branch. "Handsfree is on and the
+        // microphone is not listening" has been reported four separate times, each a different
+        // cause, and every time the first question was which one — a log that says only "closed"
+        // cannot answer it.
+        !on -> Intent.Close("handsfree is off")
+        !onStage -> Intent.Close("not on the stage")
+        !accepting -> Intent.Close("a turn is in flight")
+        avatarSpeaking -> Intent.Close("the avatar is still audible")
+        reconnecting -> Intent.Close("the room is reconnecting")
         quietMs > QUIET_MS -> Intent.GiveUp
         else -> Intent.Listen(REARM_MS + retryDelayMs)
     }

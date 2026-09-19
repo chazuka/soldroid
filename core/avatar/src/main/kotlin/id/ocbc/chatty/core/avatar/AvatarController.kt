@@ -406,11 +406,18 @@ class LiveKitAvatarController(
             }
 
             is RoomEvent.ConnectionQualityChanged -> {
-                _connection.value = when (event.quality) {
+                // Logged on change only. The server rates this continuously, and a line per rating
+                // would bury the events worth reading; a line per *transition* is the shape of the
+                // thing anyone is looking for when they ask why an answer was slow.
+                val rated = when (event.quality) {
                     ConnectionQuality.EXCELLENT, ConnectionQuality.GOOD -> AvatarConnection.GOOD
                     ConnectionQuality.POOR -> AvatarConnection.POOR
                     ConnectionQuality.LOST -> AvatarConnection.LOST
                     else -> AvatarConnection.UNKNOWN
+                }
+                if (rated != _connection.value) {
+                    Log.i(TAG, "connection ${_connection.value} to $rated")
+                    _connection.value = rated
                 }
             }
 

@@ -447,7 +447,10 @@ private fun CompanionScreen(
             quietMs = System.currentTimeMillis() - lastHeardAtMs,
             retryDelayMs = micRetryDelayMs,
         )) {
-            is Handsfree.Intent.Close -> speech.cancel()
+            is Handsfree.Intent.Close -> {
+                Log.i(HANDSFREE_TAG, "microphone closed: ${intent.because}")
+                speech.cancel()
+            }
             is Handsfree.Intent.GiveUp -> {
                 Log.i(HANDSFREE_TAG, "handsfree off: nothing heard for ${Handsfree.QUIET_MS}ms")
                 onHandsfreeTimedOut()
