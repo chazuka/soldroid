@@ -150,8 +150,16 @@ object Handsfree {
     /** How long the room may stay quiet before the mode switches itself off. */
     const val QUIET_MS = 180_000L
 
-    /** How much longer to wait before re-arming after a fault rather than a silent room. */
-    const val FAULT_BACKOFF_MS = 2_500L
+    /**
+     * How much longer to wait before re-arming after a fault rather than a silent room.
+     *
+     * Long enough not to hammer a recogniser that is genuinely unwell, short enough that a
+     * transient one does not read as the app going deaf. `ERROR_CLIENT` is the fault this actually
+     * sees and it is transient — the next listen usually succeeds — so 2.5s on top of
+     * [REARM_MS] was nearly four seconds of a microphone that looked open and heard nothing, which
+     * is the complaint this mode attracts.
+     */
+    const val FAULT_BACKOFF_MS = 800L
 
     /** The shortest press that counts as hold-to-talk. */
     const val MIN_HOLD_MS = 400L
