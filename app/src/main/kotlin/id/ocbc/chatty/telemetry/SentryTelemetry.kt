@@ -206,6 +206,7 @@ class SentryTurnSink : TurnSink {
         open.setTag("brain", turn.brain)
         open.setTag("agent", turn.agent)
         open.setTag("language", turn.language)
+        open.setTag("voice", turn.voice)
         open.setTag("handsfree", turn.handsfree.toString())
         open.setTag("warm_hit", turn.warmHit.toString())
         open.setTag("outcome", turn.outcome.name)
@@ -216,6 +217,11 @@ class SentryTurnSink : TurnSink {
         trace.firstTokenMs?.let { open.setMeasurement("first_token_ms", it) }
         trace.firstAudioMs?.let { open.setMeasurement("first_audio_ms", it) }
         trace.speakStartedMs?.let { open.setMeasurement("lips_moved_ms", it) }
+        // The legs in isolation, so a chart does not have to subtract two columns to ask "was that
+        // the synthesizer or the renderer". See TurnTrace for why they are derived rather than marked.
+        trace.ttsMs?.let { open.setMeasurement("tts_ms", it) }
+        trace.avatarMs?.let { open.setMeasurement("avatar_ms", it) }
+        open.setMeasurement("answer_chars", turn.answerChars)
         open.setMeasurement("sentences", trace.sentences)
         open.setMeasurement("starved", trace.starved)
 
