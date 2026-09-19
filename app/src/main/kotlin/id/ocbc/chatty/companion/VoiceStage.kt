@@ -684,10 +684,40 @@ private fun Exchange(
     // the answer appear to shrink. The turn always fills the caption in the end, including when the
     // voice failed or never existed, so this cannot leave the stage blank.
     val answer = state.caption ?: state.transcript.lastOrNull { !it.fromCustomer() }?.text
-    // While the microphone is open, what it has heard replaces the last question: the customer is
-    // mid-sentence and needs to see it landing, not read the previous one.
     val live = listening && partial.isNotEmpty()
-    val question = if (live) liveTail(partial) else lastQuestion
+
+    /**
+     * One line, and it is always whoever spoke last.
+     *
+     * # Why the exchange is not kept on screen
+     *
+     * The stage used to hold the question and the answer together, and they stayed there: a
+     * finished exchange sat under the face while the customer was already speaking again. Two
+     * utterances, one of them stale, on a surface whose whole job is to show what is happening
+     * *now*.
+     *
+     * This is a conversation being had, not a transcript being read — the transcript is one tap
+     * away in [CompanionMode.TEXT] and keeps everything. So the caption follows the turn: the
+     * customer's words as they are heard, their question while the model is thinking, then the
+     * agent's words as they are spoken, each replacing the last.
+     */
+    val spoken: SpokenLine? = when {
+        // What the microphone is hearing, as it hears it. [liveTail] trims the front, which is the
+        // end a speaker needs to see.
+        live -> SpokenLine(liveTail(partial), byCustomer = true)
+
+        // Between the question landing and the first word of the answer. Showing what was heard is
+        // what makes a mishearing obvious immediately rather than after a strange reply, and the
+        // typing dots below say the rest is coming.
+        state.phase == TurnPhase.THINKING -> lastQuestion?.let { SpokenLine(it, byCustomer = true) }
+
+        // The answer, revealed in step with the voice saying it.
+        answer != null -> SpokenLine(answer, byCustomer = false)
+
+        // A turn that produced nothing to say. Their question is the only thing worth holding, and
+        // the retry below is the way out.
+        else -> lastQuestion?.let { SpokenLine(it, byCustomer = true) }
+    }
 
     // On the stage the words are a caption, not a document: two lines of question and two of
     // answer, always the newest two, the way broadcast subtitles behave. The customer is
@@ -709,20 +739,20 @@ private fun Exchange(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        AnimatedVisibility(visible = question != null, enter = fadeIn(), exit = fadeOut()) {
-            val quoted = "“${question.orEmpty()}”"
+        AnimatedVisibility(visible = spoken?.byCustomer == true, enter = fadeIn(), exit = fadeOut()) {
             val questionStyle = if (mode == CompanionMode.VIDEO) {
                 MaterialTheme.typography.titleLarge
             } else {
                 MaterialTheme.typography.headlineSmall
             }
-            // The newest two lines, live or settled. A live partial is never cut at the front —
-            // [liveTail] has already trimmed it there, which is the end a speaker needs to see.
             TailText(
-                text = AnnotatedString(quoted),
+                // Quoted, because on a surface that shows one line at a time the quotes are what
+                // say whose words these are.
+                text = AnnotatedString("“${spoken?.text.orEmpty()}”"),
                 maxLines = CAPTION_MAX_LINES,
                 style = questionStyle,
                 color = Color.White,
+                // Dimmed while it is still being heard: unfinished words, not yet a question.
                 modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
             )
         }
@@ -735,8 +765,8 @@ private fun Exchange(
         ) {
             TypingDotsOverPhoto()
         }
-        AnimatedVisibility(visible = answer != null, enter = fadeIn(), exit = fadeOut()) {
-            val body = streamingText(answer.orEmpty(), streaming = streaming)
+        AnimatedVisibility(visible = spoken?.byCustomer == false, enter = fadeIn(), exit = fadeOut()) {
+            val body = streamingText(spoken?.text.orEmpty(), streaming = streaming)
             val answerStyle = if (mode == CompanionMode.VIDEO) {
                 MaterialTheme.typography.bodyMedium
             } else {
@@ -997,6 +1027,9 @@ private const val BAR_STAGGER_MS = 70
 private const val BAR_IDLE_ALPHA = 0.35f
 
 /** Long-form measure: the question and the answer stay readable rather than running the full width. */
+/** The one line on the stage, and who said it. */
+private data class SpokenLine(val text: String, val byCustomer: Boolean)
+
 private val EXCHANGE_MAX_WIDTH = 340.dp
 
 /**
