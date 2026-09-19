@@ -213,6 +213,48 @@ data class TurnTrace(
     private fun both(from: Long?, to: Long?): Long? =
         if (from != null && to != null && to >= from) to - from else null
 
+    /**
+     * Every number this trace holds, named the way a backend should group them.
+     *
+     * # Why the trace names its own numbers
+     *
+     * The telemetry adapter used to list the fields itself, and it silently fell behind. Three
+     * marks were added to this class — the frame reaching the socket, the sound reaching the room,
+     * and the provider's error about its own timing — and none of them reached the backend, because
+     * adding a field here does not make anything forward it. The dashboard went on charting an
+     * avatar leg that had since been shown to be measuring the wrong thing.
+     *
+     * So the mapping lives with the data. An adapter iterates this and cannot omit anything; a new
+     * mark is forwarded by existing it. Null marks are absent rather than zero, for the same reason
+     * they are absent everywhere else here: a leg that did not happen is not a leg that took no time.
+     *
+     * ```
+     * trace.measurements().forEach { (name, value) -> transaction.setMeasurement(name, value) }
+     * ```
+     */
+    fun measurements(): Map<String, Long> = buildMap {
+        listenedMs?.let { put("listened_ms", it) }
+        firstTokenMs?.let { put("first_token_ms", it) }
+        answerCompleteMs?.let { put("answer_complete_ms", it) }
+        firstClauseMs?.let { put("first_clause_ms", it) }
+        firstAudioMs?.let { put("first_audio_ms", it) }
+        frameSentMs?.let { put("frame_sent_ms", it) }
+        speakStartedMs?.let { put("lips_moved_ms", it) }
+        audibleMs?.let { put("audible_ms", it) }
+        speakEndedMs?.let { put("speak_ended_ms", it) }
+
+        clauseMs?.let { put("clause_ms", it) }
+        ttsMs?.let { put("tts_ms", it) }
+        uplinkMs?.let { put("uplink_ms", it) }
+        renderMs?.let { put("render_ms", it) }
+        avatarMs?.let { put("avatar_ms", it) }
+        claimSkewMs?.let { put("claim_skew_ms", it) }
+
+        put("sentences", sentences.toLong())
+        put("starved", starved.toLong())
+        put("reconnects", reconnects.toLong())
+    }
+
     /** One line for a log or a debug overlay. Null marks render as `—`, never as `0`. */
     fun summary(): String = buildString {
         listenedMs?.let { append("heard ").append(it.ms()).append("  ") }
