@@ -176,7 +176,7 @@ class LiveAvatarSession(
         val tokenRequest = TokenRequestDto(
             mode = MODE_LITE,
             avatarId = avatarId,
-            videoSettings = VideoSettingsDto(),
+            videoSettings = VideoSettingsDto(quality = VIDEO_QUALITY, encoding = VIDEO_ENCODING),
         )
         val token = json.decodeFromJsonElement<TokenDto>(
             post(PATH_SESSION_TOKEN, bearer = null, body = json.encodeToString(tokenRequest)),
@@ -428,6 +428,22 @@ class LiveAvatarSession(
 
         private const val STOP_USER_CLOSED = "USER_CLOSED"
 
+        /**
+         * `low`, `medium`, `high` or `very_high`. This is the one setting that actually moves:
+         * [VIDEO_ENCODING] matches what the provider would have chosen anyway, so until this commit
+         * the room had been running at whatever LiveAvatar defaults to rather than at `high`.
+         *
+         * More pixels is more bitrate through the same handset connection, and a renderer that runs
+         * short of data is a mouth that stalls mid-word — see [LiveAvatarEvent.Starved], which the
+         * turn trace counts. If the face is sharp on wifi and breaking up on 4G, this is the knob,
+         * and it only turns downwards: `very_high` is 1080p, which this account's plan refuses with
+         * `4030 — 1080p sessions require a Business or Enterprise plan`. `high` is the ceiling here.
+         */
+        private const val VIDEO_QUALITY = "high"
+
+        /** H264. VP8 is deprecated at the provider; this is also their default, so it pins rather than changes. */
+        private const val VIDEO_ENCODING = "H264"
+
         private const val KEEP_ALIVE_MS = 30_000L
         private const val READY_TIMEOUT_MS = 3_000L
         private const val MILLIS_PER_SECOND = 1_000L
@@ -460,11 +476,20 @@ private data class TokenRequestDto(
  * phone screen, so this is the cheapest quality lever there is. H264 is the only non-deprecated
  * codec — VP8 is deprecated — and pinning it here means a change of vendor default cannot quietly
  * change what the room sees.
+ *
+ * # Why there are no default values here
+ *
+ * There were, and they were the bug. [LenientJson] leaves `encodeDefaults` off, so a field whose
+ * value equals its declared default is dropped from the request body — silently. Built as
+ * `VideoSettingsDto()`, every field was its own default, and what actually went out was
+ * `"video_settings":{}`: the provider applied its own settings for the entire life of this file,
+ * while the comment above said they were pinned. Passing them at the call site is what makes the
+ * paragraph above true.
  */
 @Serializable
 private data class VideoSettingsDto(
-    val quality: String = "high",
-    val encoding: String = "H264",
+    val quality: String,
+    val encoding: String,
 )
 
 @Serializable
