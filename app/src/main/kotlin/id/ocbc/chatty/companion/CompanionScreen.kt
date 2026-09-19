@@ -217,7 +217,6 @@ fun CompanionRoute(
             mode = next
         },
         onAsk = viewModel::ask,
-        onSpeculate = viewModel::speculate,
         onRetry = viewModel::retry,
         onInterrupt = viewModel::interrupt,
         onSpeechProblem = viewModel::onSpeechProblem,
@@ -248,7 +247,6 @@ private fun CompanionScreen(
     controller: id.ocbc.chatty.core.avatar.AvatarController,
     onModeChange: (CompanionMode) -> Unit,
     onAsk: (question: String, listenedMs: Long?) -> Unit,
-    onSpeculate: (partialQuestion: String) -> Unit,
     onRetry: () -> Unit,
     onInterrupt: () -> Unit,
     onSpeechProblem: (SpeechProblem) -> Unit,
@@ -522,19 +520,7 @@ private fun CompanionScreen(
     LaunchedEffect(state.handsfree, onStage, listening, partial) {
         if (!state.handsfree || !onStage || !listening || partial.isEmpty()) return@LaunchedEffect
 
-        // Partway through the pause, hand the question to the model on the strength of the partial
-        // transcript. The rest of this wait — and the recogniser's own finalising after it — then
-        // happens while an answer is already being written.
-        //
-        // This effect restarts on every new word, so a customer who is still talking cancels the
-        // speculation before it is sent and the one that eventually goes is the one they stopped
-        // on. Nothing is shown or spoken from it unless the finished transcript agrees; see
-        // [CompanionViewModel.speculate].
-        delay(HANDSFREE_SPECULATE_AFTER_MS)
-        Log.i(HANDSFREE_TAG, "speculating after ${HANDSFREE_SPECULATE_AFTER_MS}ms of quiet")
-        onSpeculate(partial)
-
-        delay(HANDSFREE_SETTLE_MS - HANDSFREE_SPECULATE_AFTER_MS)
+        delay(HANDSFREE_SETTLE_MS)
         Log.i(HANDSFREE_TAG, "end of question: ${HANDSFREE_SETTLE_MS}ms with no new words")
         speech.stop()
     }
@@ -605,7 +591,6 @@ private fun CompanionScreen(
                 TextMode(
                     state = state,
                     onAsk = onAsk,
-                    onSpeculate = onSpeculate,
                     onRetry = onRetry,
                     onShowFace = { onModeChange(CompanionMode.VIDEO) },
                     onToggleLanguage = onToggleLanguage,
@@ -630,7 +615,6 @@ private fun CompanionScreen(
 private fun TextMode(
     state: CompanionUiState,
     onAsk: (question: String, listenedMs: Long?) -> Unit,
-    onSpeculate: (partialQuestion: String) -> Unit,
     onRetry: () -> Unit,
     onShowFace: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -968,32 +952,6 @@ private val COMPOSER_CONTROL_SIZE = 44.dp
 private const val HANDSFREE_WATCHDOG_MS = 5_000L
 
 private const val HANDSFREE_SETTLE_MS = 1_200L
-
-/**
- * How long the words must stop arriving before the model is started on the partial question.
- *
- * # Why this is not as small as possible
- *
- * The point of speculating is lead time, so the instinct is to guess early, and this was 400ms.
- * Measured acoustically on a handset it then produced a truncated guess on every single turn: 26
- * characters against the 34 finally said, 25 against 31, 16 against 28, and every one discarded.
- * A speculation that always misses is not a latency win, it is a billed request per turn bought in
- * exchange for nothing.
- *
- * The cause is that partial results do not arrive evenly. They come in bursts with gaps between
- * them comfortably longer than 400ms, so "no new words for 400ms" describes an ordinary pause
- * inside a sentence rather than the end of one.
- *
- * Nine hundred is chosen against the other clock in this system: the recogniser ends the utterance
- * by itself after `ENDPOINT_SILENCE_MS`, 1,500ms of real silence. Guessing at 900ms still buys most
- * of a second of lead, and buys it on a question far more likely to be whole. Raising it further
- * converges on never speculating at all; lowering it is what was measured and does not work.
- *
- * Getting it wrong stays cheap in one direction and free in the other: too eager wastes a request,
- * too late merely speculates less often. It can never produce an answer to the wrong question,
- * because the finished transcript still has to agree before a word of it is used.
- */
-private const val HANDSFREE_SPECULATE_AFTER_MS = 900L
 
 /** The longest a single handsfree listen may run before it is closed and retried. */
 private const val HANDSFREE_MAX_LISTEN_MS = 15_000L

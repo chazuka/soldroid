@@ -72,46 +72,6 @@ object TurnRules {
             .filter { it.isNotEmpty() }
 
     /**
-     * Whether two transcripts are the same question, allowing for how a recogniser tidies up.
-     *
-     * # Why this decides whether a speculative answer may be used
-     *
-     * A question can be sent to the model before the recogniser has finished, using the partial
-     * transcript, which buys back most of the pause spent waiting for silence. That is only safe if
-     * the answer is thrown away unless the finished transcript says the same thing — otherwise the
-     * customer gets an answer to half a sentence, which is worse than waiting for the whole one.
-     *
-     * Exact equality would throw away almost every speculation, because finalising is precisely
-     * when a recogniser adds the full stop, fixes the capital and settles on a spelling. So the
-     * comparison is on the words: case folded, punctuation dropped, runs of space collapsed.
-     * Anything that changes a *word* is a different question and the speculation is discarded.
-     *
-     * ```
-     * sameQuestion("berapa saldo saya", "Berapa saldo saya?")   // true  — tidied, not changed
-     * sameQuestion("berapa saldo", "berapa saldo saya")          // false — they said more
-     * ```
-     */
-    fun sameQuestion(spoken: String, finished: String): Boolean =
-        spoken.asQuestionKey() == finished.asQuestionKey()
-
-    /**
-     * The comparable form of a transcript: its words, and nothing a recogniser adds on the way out.
-     *
-     * Digits are kept as digits and letters folded to lower case. Everything that is neither is a
-     * separator, which collapses "Rp3.240.000?" and "rp3 240 000" to the same key — right for this
-     * purpose, because a recogniser that re-punctuates a figure has not heard a different question.
-     */
-    /** [asQuestionKey], exposed so a caller can describe a mismatch without quoting either side. */
-    fun questionKey(text: String): String = text.asQuestionKey()
-
-    private fun String.asQuestionKey(): String =
-        lowercase().map { if (it.isLetterOrDigit()) it else ' ' }
-            .joinToString("")
-            .split(' ')
-            .filter { it.isNotEmpty() }
-            .joinToString(" ")
-
-    /**
      * How this turn should be reported to whoever is collecting turns.
      *
      * # Why this is a rule rather than three lines at each call site

@@ -41,7 +41,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.receiveAsFlow
 import id.ocbc.chatty.core.ai.Brain
 import id.ocbc.chatty.core.ai.Brains
 import id.ocbc.chatty.core.ai.revealCaptions
@@ -248,9 +247,6 @@ class CompanionViewModel @Inject constructor(
      */
     private var warmed = false
 
-    /** Whether the last turn used an answer started before the question finished. */
-    private var speculated = Speculated.NONE
-
     /**
      * Whether the customer cut this turn short.
      *
@@ -261,40 +257,6 @@ class CompanionViewModel @Inject constructor(
      * short answer.
      */
     private var interrupted = false
-
-    /**
-     * An answer already being generated for a question the customer has probably finished asking.
-     *
-     * # Why an answer is started before the question is
-     *
-     * Handsfree has no button to let go of, so the end of a question is a pause: the screen waits
-     * for [HANDSFREE_SETTLE_MS] of no new words, then closes the utterance and the recogniser
-     * finalises. All of that is dead time in which the model could already have been writing.
-     *
-     * So the screen asks for a speculation partway through that pause, on the partial transcript.
-     * If the finished transcript says the same thing the answer is already in flight and the
-     * customer gets it most of a second sooner; if it says anything else the answer is thrown away
-     * unheard and the turn runs exactly as it always did.
-     *
-     * The discipline that makes this safe is [TurnRules.sameQuestion] and the fact that nothing is
-     * shown, spoken, or added to the transcript until a turn adopts it. Being wrong costs one API
-     * call, never a wrong answer.
-     */
-    private var speculation: Speculation? = null
-
-    /**
-     * One answer generated ahead of the question being finished.
-     *
-     * Fragments land in an unbounded channel rather than being collected into a string, so that
-     * adopting one is just draining it: whatever arrived before adoption is replayed in order, and
-     * whatever comes after continues to flow. The turn downstream cannot tell the difference
-     * between this and a reply it asked for itself, which is what keeps the pipeline unchanged.
-     */
-    private class Speculation(
-        val question: String,
-        val job: Job,
-        val fragments: Channel<String>,
-    )
 
     init {
         viewModelScope.launch {
@@ -457,81 +419,7 @@ class CompanionViewModel @Inject constructor(
             )
         }
 
-        // Adopted only when the finished transcript says the same thing as the one the speculation
-        // was started on. Anything else is discarded unheard.
-        val pending = speculation
-        val adopted = pending?.takeIf { TurnRules.sameQuestion(it.question, text) }
-        if (adopted == null) discardSpeculation() else speculation = null
-        // Why a guess missed, without putting the customer's question in the log.
-        //
-        // Speculation is the largest lever this app has over a slow model, and on a handset it was
-        // missing every single time, which costs a billed request per turn and buys nothing. The
-        // two ways it can miss want opposite fixes: if the guess is a prefix of what was finally
-        // said, the guess was simply made too early and the delay should grow; if it is not, the
-        // recogniser revised words it had already emitted and no delay will help. Lengths and a
-        // prefix flag separate those two and carry none of the content.
-        if (pending != null && adopted == null) {
-            val guess = TurnRules.questionKey(pending.question)
-            val said = TurnRules.questionKey(text)
-            Log.i(
-                TAG,
-                "guess missed: guessed ${guess.length} chars, heard ${said.length}, " +
-                    "guess was ${if (said.startsWith(guess)) "cut short" else "revised"}",
-            )
-        }
-        // Keyed on whether a speculation actually existed, not on how the question arrived. A
-        // hold-to-talk question has a listening leg and no speculation, and reporting that as a
-        // miss would invent a failure rate out of a path that never tried.
-        speculated = when {
-            adopted != null -> Speculated.ADOPTED
-            pending != null -> Speculated.MISSED
-            else -> Speculated.NONE
-        }
-
-        turn = viewModelScope.launch { runTurn(agent, history, adopted) }
-    }
-
-    /**
-     * Starts answering [partialQuestion] before the customer has finished asking it.
-     *
-     * Called by the screen partway through the pause that ends a handsfree question — see
-     * [speculation] for why, and [TurnRules.sameQuestion] for the rule that decides whether the
-     * result may ever be used. Cheap to call repeatedly: a newer partial replaces an older
-     * speculation, and the one it replaces is cancelled.
-     *
-     * Nothing about this is visible. No transcript entry, no phase change, no notice — a
-     * speculation that is never adopted leaves no trace except a billed request.
-     */
-    fun speculate(partialQuestion: String) {
-        val current = _state.value
-        val agent = current.agent ?: return
-        val text = partialQuestion.trim()
-        if (text.isEmpty() || !current.acceptingInput) return
-        if (speculation?.question == text) return
-
-        discardSpeculation()
-        val history = current.transcript + TranscriptEntry(Speaker.CUSTOMER, text)
-        val fragments = Channel<String>(Channel.UNLIMITED)
-        val chat = brains[current.brain]
-        val job = viewModelScope.launch {
-            runCatching { chat.reply(agent.id, history.asChatHistory(), current.language).collect(fragments::send) }
-                .fold(
-                    onSuccess = { fragments.close() },
-                    // Closed with the failure rather than swallowed: if this speculation is adopted
-                    // the turn must fail the way it would have failed on its own.
-                    onFailure = { fragments.close(it) },
-                )
-        }
-        speculation = Speculation(text, job, fragments)
-    }
-
-    /** Throws away the answer in flight, if any. */
-    private fun discardSpeculation() {
-        speculation?.let {
-            it.job.cancel()
-            it.fragments.close()
-        }
-        speculation = null
+        turn = viewModelScope.launch { runTurn(agent, history) }
     }
 
     /**
@@ -544,7 +432,6 @@ class CompanionViewModel @Inject constructor(
     private suspend fun runTurn(
         agent: Agent,
         history: List<TranscriptEntry>,
-        adopted: Speculation? = null,
     ) {
         // A session near its cap would die mid-answer. Replacing it first costs a second of silence
         // before the turn; letting it expire costs the face in the middle of one.
@@ -570,11 +457,8 @@ class CompanionViewModel @Inject constructor(
         turnInFlight = true
         // Falls back to the demo API if the chosen brain has no key in this build, which is the same
         // rule the chooser uses — it just cannot be reached from the UI.
-        // An adopted speculation is already generating; draining its channel replays what arrived
-        // before the question finished and then follows the rest live, so everything downstream is
-        // unchanged. Nothing else knows the difference.
         val chat = brains[_state.value.brain]
-        val fragments = (adopted?.fragments?.receiveAsFlow() ?: chat.reply(agent.id, history.asChatHistory(), _state.value.language))
+        val fragments = chat.reply(agent.id, history.asChatHistory(), _state.value.language)
             .onEach { fragment ->
                 answer.append(fragment)
                 mark { copy(firstTokenMs = firstTokenMs ?: elapsed()) }
@@ -714,14 +598,7 @@ class CompanionViewModel @Inject constructor(
         // The label, not the enum. The same anonymity the chooser and the telemetry keep: a vendor
         // name here hands whoever is reading the traces a prior about which brain should be faster,
         // and comparing them without one is the reason these numbers are collected.
-        // The speculation outcome rides on the same line as the timings, because it is the one
-        // thing that explains a first-token figure that would otherwise look impossible. Starting
-        // the model on a partial question is the largest lever this app has over a slow one, and
-        // whether it is paying off was previously visible only to the telemetry backend, which is
-        // no use at all while sitting in front of the handset watching a turn.
-        _state.value.trace?.let {
-            Log.i(TAG, "turn ${_state.value.brain.label}: ${it.summary()}  guess ${speculated.name.lowercase()}")
-        }
+        _state.value.trace?.let { Log.i(TAG, "turn ${_state.value.brain.label}: ${it.summary()}") }
         recordTurn(
             TurnRules.outcome(
                 answered = text.isNotEmpty(),
@@ -759,7 +636,6 @@ class CompanionViewModel @Inject constructor(
                 voice = agent?.avatar?.voiceFor(state.language).orEmpty(),
                 handsfree = state.handsfree,
                 warmHit = warmed,
-                speculated = speculated.name,
                 // So a slow turn can be told apart from a slow network afterwards. Without it every
                 // complaint about lag looks identical in the data.
                 connection = state.connection.name,
@@ -858,18 +734,6 @@ class CompanionViewModel @Inject constructor(
             )
         }
         turn = viewModelScope.launch { runTurn(agent, current.transcript) }
-    }
-
-    /** Whether a turn was answered ahead of time, and if not, why not. */
-    private enum class Speculated {
-        /** Not a spoken question, so there was no pause to speculate during. */
-        NONE,
-
-        /** Speculated, and the finished transcript said the same thing. The fast path. */
-        ADOPTED,
-
-        /** Speculated and thrown away: the customer said something other than the guess. */
-        MISSED,
     }
 
     /** Cuts the current answer short. The turn ends where the customer stopped it. */
@@ -1052,7 +916,6 @@ class CompanionViewModel @Inject constructor(
     /** Called when the customer leaves the conversation, so the billed session stops with the screen. */
     fun close() {
         turn?.cancel()
-        discardSpeculation()
         closeSession()
         controller.detach()
         _state.value = CompanionUiState()
