@@ -63,10 +63,29 @@ class TurnTraceTest {
 class TurnLegsTest {
 
     @Test
-    fun `synthesis is the gap between the first token and the first audio`() {
+    fun `synthesis is timed from the clause, not from the first token`() {
+        // The distinction that makes a voice comparison mean anything. Here the model spent 1.2s
+        // finishing its opening sentence and the voice spent 300ms on it; charging the voice for
+        // all 1.5s is how a wordy model came to look like a slow voice.
+        val trace = TurnTrace(
+            askedAtMs = 0,
+            firstTokenMs = 1_000,
+            firstClauseMs = 2_200,
+            firstAudioMs = 2_500,
+        )
+
+        assertEquals(1_200L, trace.clauseMs)
+        assertEquals(300L, trace.ttsMs)
+    }
+
+    @Test
+    fun `a turn whose first clause never completed has no synthesis leg`() {
+        // The model started writing and the turn died before a sentence was whole. There is nothing
+        // to say about the voice, and saying nothing is the correct answer.
         val trace = TurnTrace(askedAtMs = 0, firstTokenMs = 1_000, firstAudioMs = 1_700)
 
-        assertEquals(700L, trace.ttsMs)
+        assertNull(trace.ttsMs)
+        assertNull(trace.clauseMs)
     }
 
     @Test
@@ -80,7 +99,7 @@ class TurnLegsTest {
     fun `a leg that never happened is absent, not zero`() {
         // A turn that failed before any audio. Zero would read as instant synthesis and drag every
         // average it lands in towards a number nothing achieved.
-        val failed = TurnTrace(askedAtMs = 0, firstTokenMs = 1_000)
+        val failed = TurnTrace(askedAtMs = 0, firstTokenMs = 1_000, firstClauseMs = 1_400)
 
         assertNull(failed.ttsMs)
         assertNull(failed.avatarMs)
@@ -97,14 +116,14 @@ class TurnLegsTest {
 
     @Test
     fun `marks that arrive out of order do not produce a negative leg`() {
-        val backwards = TurnTrace(askedAtMs = 0, firstTokenMs = 2_000, firstAudioMs = 1_000)
+        val backwards = TurnTrace(askedAtMs = 0, firstClauseMs = 2_000, firstAudioMs = 1_000)
 
         assertNull(backwards.ttsMs)
     }
 
     @Test
     fun `legs that are genuinely instant are still reported`() {
-        val instant = TurnTrace(askedAtMs = 0, firstTokenMs = 1_000, firstAudioMs = 1_000)
+        val instant = TurnTrace(askedAtMs = 0, firstClauseMs = 1_000, firstAudioMs = 1_000)
 
         assertEquals(0L, instant.ttsMs)
     }

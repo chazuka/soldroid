@@ -219,6 +219,7 @@ class SentryTurnSink : TurnSink {
         trace.speakStartedMs?.let { open.setMeasurement("lips_moved_ms", it) }
         // The legs in isolation, so a chart does not have to subtract two columns to ask "was that
         // the synthesizer or the renderer". See TurnTrace for why they are derived rather than marked.
+        trace.clauseMs?.let { open.setMeasurement("clause_ms", it) }
         trace.ttsMs?.let { open.setMeasurement("tts_ms", it) }
         trace.avatarMs?.let { open.setMeasurement("avatar_ms", it) }
         open.setMeasurement("answer_chars", turn.answerChars)
