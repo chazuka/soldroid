@@ -57,12 +57,15 @@ enum class Brain(
         /**
          * The one every conversation starts on.
          *
-         * # Why this is [ANTHROPIC] rather than the first entry
+         * # Why this is [KAMARTAJ]
          *
-         * Measured on a Galaxy S25 over the same session: [ANTHROPIC] reached the avatar's lips at
-         * 2.5–2.9 s, [KAMARTAJ] at 8.8–15.4 s. Nobody demonstrating this app chooses the second
-         * number on purpose, and a default is what most people will ever see — so the default is
-         * the fast stack, and the comparison the chooser exists for starts from the good end.
+         * It is the app's own stack, and the one the demo is meant to show. Speed is the argument
+         * against it and it is a weaker argument than it was: measured acoustically on a Galaxy S25,
+         * sound reaches the room at about 4.6 s on this stack against about 2.7 s on [ANTHROPIC],
+         * not the 8.8–15.4 s recorded earlier. Roughly three quarters of that 4.6 s is the model's
+         * own first token; about 150 ms of it belongs to this app.
+         *
+         * The chooser still exists, and the comparison it is for is a tap away.
          *
          * Still resolved rather than named outright. [offered] wins over this preference, so
          * switching a model off cannot leave the conversation pointed at something the chooser does
@@ -78,7 +81,7 @@ enum class Brain(
          * knows which keys this APK was built with.
          */
         val Default: Brain =
-            ANTHROPIC.takeIf { it.offered } ?: entries.firstOrNull { it.offered } ?: KAMARTAJ
+            KAMARTAJ.takeIf { it.offered } ?: entries.firstOrNull { it.offered } ?: KAMARTAJ
     }
 }
 

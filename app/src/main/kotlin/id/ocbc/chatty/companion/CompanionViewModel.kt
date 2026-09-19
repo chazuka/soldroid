@@ -633,7 +633,11 @@ class CompanionViewModel @Inject constructor(
                 language = state.language.tag,
                 // Resolved the same way the turn resolved it, so the dimension names the voice that
                 // actually spoke rather than the one the switch happens to point at now.
-                voice = agent?.avatar?.voiceFor(state.language).orEmpty(),
+                // The persona rather than the provider's voice id. The id groups correctly and is
+                // unreadable on a chart, which is the only thing this tag is for. Note that [agent]
+                // already carries the same value, so what actually separates one persona's two
+                // voices is this tag read together with [language].
+                voice = agent?.id.orEmpty(),
                 handsfree = state.handsfree,
                 warmHit = warmed,
                 // So a slow turn can be told apart from a slow network afterwards. Without it every

@@ -20,17 +20,18 @@ import org.junit.Test
 class BrainsTest {
 
     @Test
-    fun `the default is the fast stack`() {
-        // Measured on a handset: 2.5-2.9s to the lips against 8.8-15.4s. A default is what most
-        // people ever see, so it is the good end of that comparison.
-        assertEquals(Brain.ANTHROPIC, Brain.Default)
+    fun `the default is this app's own stack`() {
+        // It is what the demo is there to show. Speed is the argument against it and it is weaker
+        // than it was: measured acoustically, sound at about 4.6s against about 2.7s, of which
+        // roughly three quarters is the model's own first token and about 150ms is this app.
+        assertEquals(Brain.KAMARTAJ, Brain.Default)
     }
 
     @Test
     fun `a build with every key starts on the default`() {
         val brains = Brains(mapOf(Brain.KAMARTAJ to Stub, Brain.ANTHROPIC to Stub))
 
-        assertEquals(Brain.ANTHROPIC, brains.default)
+        assertEquals(Brain.KAMARTAJ, brains.default)
     }
 
     @Test
