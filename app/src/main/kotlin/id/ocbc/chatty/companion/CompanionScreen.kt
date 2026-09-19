@@ -404,12 +404,31 @@ private fun CompanionScreen(
         if (state.handsfree && onStage) lastHeardAtMs = System.currentTimeMillis()
     }
 
+    // A language change replaces the recogniser wrapper, and the listen in flight belongs to the
+    // old one.
+    //
+    // The language is fixed when a listen *starts* — it rides in the intent — so a change can only
+    // take effect on the next one, and the one already running would go on listening in the
+    // language the customer just switched away from. Cancelling it here ends that stale listen and
+    // lets the effect below open a fresh one in the language they chose.
+    //
+    // Declared before that effect so the two run in this order on the same change: cancel, then
+    // re-arm. On first composition there is nothing listening and this does nothing.
+    LaunchedEffect(speech) {
+        speech.cancel()
+    }
+
     // One effect, deliberately. An earlier version split "open the microphone" and "close the
     // microphone" across two effects, and lost the race between them: the close ran, then a rearm
     // already in flight opened the microphone again a beat later, leaving it listening with
     // handsfree switched off. Keyed on a single condition, Compose cancels the pending open before
     // it can happen.
-    LaunchedEffect(wantsMic, rearm) {
+    //
+    // [speech] is a key because it is replaced whenever the listening language changes, and the
+    // condition above it is not: handsfree stays on, the stage stays up, and the turn machine stays
+    // idle. Without it the switch left a live conversation with a microphone that never opened
+    // again — nothing looked broken, and nothing was heard.
+    LaunchedEffect(wantsMic, rearm, speech) {
         when (val intent = Handsfree.intent(
             on = state.handsfree,
             onStage = onStage,
