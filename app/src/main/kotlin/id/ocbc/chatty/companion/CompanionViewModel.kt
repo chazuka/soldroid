@@ -343,6 +343,15 @@ class CompanionViewModel @Inject constructor(
         val text = question.trim()
         if (text.isEmpty() || !current.acceptingInput) return
 
+        // The agent's own voice, arriving back through the microphone. Dropped without a trace:
+        // there is no customer to tell, nothing went wrong from their side, and a notice about it
+        // would be the app explaining its own plumbing. See [TurnRules.isEcho].
+        val lastAnswer = current.transcript.lastOrNull { it.speaker == Speaker.AGENT }?.text
+        if (TurnRules.isEcho(text, lastAnswer)) {
+            Log.i(TAG, "ignored ${text.length} chars of the agent's own voice")
+            return
+        }
+
         val history = current.transcript + TranscriptEntry(Speaker.CUSTOMER, text)
         // The language of the *question*, adopted before the turn runs.
         //
