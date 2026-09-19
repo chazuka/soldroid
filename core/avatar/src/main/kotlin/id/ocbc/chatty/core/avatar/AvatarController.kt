@@ -56,6 +56,23 @@ interface AvatarController {
     val audioMuted: StateFlow<Boolean>
 
     /**
+     * Whether the avatar is making sound right now, as the decoded audio itself reports it.
+     *
+     * # Why this and not the provider's own event
+     *
+     * The provider says when it has finished *sending* an utterance, and it has been observed
+     * saying so 178ms after the lips started on a three-sentence answer. The audio is still
+     * crossing the network and sitting in a jitter buffer at that point, and a microphone opened on
+     * that signal hears the rest of the answer and asks the agent about it.
+     *
+     * This comes from the other end of the pipe: the room reports which participants are audible,
+     * computed from the audio actually being played out. It cannot be early, because it is the
+     * sound itself. It can be late — the level has to fall and stay fallen — and late is the side
+     * to err on when the question is "has it stopped talking yet".
+     */
+    val speaking: StateFlow<Boolean>
+
+    /**
      * Silence (or restore) the avatar's voice on this device only.
      *
      * Local playout mute, not barge-in: the utterance keeps streaming and the end-of-speech watchdog
@@ -146,6 +163,9 @@ class LiveKitAvatarController(
 
     private val _audioMuted = MutableStateFlow(false)
     override val audioMuted: StateFlow<Boolean> = _audioMuted.asStateFlow()
+
+    private val _speaking = MutableStateFlow(false)
+    override val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     // The avatar's remote audio, held only to gate local playout. The room subscribes regardless;
     // muting flips the underlying rtc track's enabled flag, which stops playout without touching
@@ -282,6 +302,7 @@ class LiveKitAvatarController(
             } catch (e: Exception) {
                 // The face must not freeze on the last decoded frame.
                 _videoTrack.value = null
+                _speaking.value = false
                 _events.tryEmit(AvatarEvent.Failed(e.message ?: "connect failed"))
             }
         }
@@ -313,17 +334,24 @@ class LiveKitAvatarController(
 
             is RoomEvent.TrackUnsubscribed -> {
                 if (event.track === _videoTrack.value) _videoTrack.value = null
+                _speaking.value = false
                 if (event.track === audioTrack) audioTrack = null
             }
 
+            // Anyone audible in this room is the avatar: this app never publishes a microphone, so
+            // the only participant that can make a sound is the one it came to listen to.
+            is RoomEvent.ActiveSpeakersChanged -> _speaking.value = event.speakers.isNotEmpty()
+
             is RoomEvent.Disconnected -> {
                 _videoTrack.value = null
+                _speaking.value = false
                 // A disconnect we asked for is not a failure; `detach()` nulls the track first.
                 event.error?.let { _events.tryEmit(AvatarEvent.Failed(it.message ?: "disconnected")) }
             }
 
             is RoomEvent.FailedToConnect -> {
                 _videoTrack.value = null
+                _speaking.value = false
                 _events.tryEmit(AvatarEvent.Failed(event.error.message ?: "failed to connect"))
             }
 
@@ -374,6 +402,7 @@ class LiveKitAvatarController(
         audioManager.abandonAudioFocusRequest(focusRequest)
         focusLost = false
         _videoTrack.value = null
+                _speaking.value = false
         audioTrack = null
         _audioMuted.value = false
         // Guarded: after a terminal release() the room is disposed, and touching it would fault.

@@ -94,7 +94,7 @@ class HandsfreeTest {
         // The agent speaks through the same handset the microphone is in.
         assertEquals(
             Handsfree.Intent.Close,
-            Handsfree.intent(on = true, onStage = true, accepting = false, quietMs = 0, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = true, accepting = false, avatarSpeaking = false, quietMs = 0, retryDelayMs = 0),
         )
     }
 
@@ -102,7 +102,7 @@ class HandsfreeTest {
     fun `the thread gets no microphone`() {
         assertEquals(
             Handsfree.Intent.Close,
-            Handsfree.intent(on = true, onStage = false, accepting = true, quietMs = 0, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = false, accepting = true, avatarSpeaking = false, quietMs = 0, retryDelayMs = 0),
         )
     }
 
@@ -110,7 +110,7 @@ class HandsfreeTest {
     fun `an armed and idle stage opens the microphone`() {
         assertEquals(
             Handsfree.Intent.Listen(Handsfree.REARM_MS),
-            Handsfree.intent(on = true, onStage = true, accepting = true, quietMs = 0, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, quietMs = 0, retryDelayMs = 0),
         )
     }
 
@@ -122,6 +122,7 @@ class HandsfreeTest {
                 on = true,
                 onStage = true,
                 accepting = true,
+                avatarSpeaking = false,
                 quietMs = 0,
                 retryDelayMs = Handsfree.FAULT_BACKOFF_MS,
             ),
@@ -136,6 +137,7 @@ class HandsfreeTest {
                 on = true,
                 onStage = true,
                 accepting = true,
+                avatarSpeaking = false,
                 quietMs = Handsfree.QUIET_MS + 1,
                 retryDelayMs = 0,
             ),
@@ -148,7 +150,7 @@ class HandsfreeTest {
         // face-down on a desk while the customer considers the answer.
         assertEquals(
             Handsfree.Intent.Listen(Handsfree.REARM_MS),
-            Handsfree.intent(on = true, onStage = true, accepting = true, quietMs = 60_000, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, quietMs = 60_000, retryDelayMs = 0),
         )
     }
 
@@ -167,5 +169,38 @@ class HandsfreeTest {
     @Test
     fun `handsfree ends its own listens`() {
         assertEquals(Handsfree.Release.IGNORE, Handsfree.release(on = true, heldMs = 1_500))
+    }
+
+    @Test
+    fun `the microphone stays shut while the avatar is audible`() {
+        // The turn can be over and the answer still coming out of the speaker: the provider reports
+        // the end of an utterance, and the audio is still in a jitter buffer on its way out. Opened
+        // then, the microphone hears the rest of the answer and the agent interviews itself.
+        assertEquals(
+            Handsfree.Intent.Close,
+            Handsfree.intent(
+                on = true,
+                onStage = true,
+                accepting = true,
+                avatarSpeaking = true,
+                quietMs = 0,
+                retryDelayMs = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `it opens once the avatar has gone quiet`() {
+        assertEquals(
+            Handsfree.Intent.Listen(Handsfree.REARM_MS),
+            Handsfree.intent(
+                on = true,
+                onStage = true,
+                accepting = true,
+                avatarSpeaking = false,
+                quietMs = 0,
+                retryDelayMs = 0,
+            ),
+        )
     }
 }

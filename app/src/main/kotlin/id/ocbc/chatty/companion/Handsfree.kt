@@ -43,12 +43,18 @@ object Handsfree {
         on: Boolean,
         onStage: Boolean,
         accepting: Boolean,
+        avatarSpeaking: Boolean,
         quietMs: Long,
         retryDelayMs: Long,
     ): Intent = when {
         // The agent speaks through the same handset the microphone is in, so the microphone is shut
         // for the whole of a turn rather than merely not re-opened.
-        !on || !onStage || !accepting -> Intent.Close
+        //
+        // [avatarSpeaking] is the belt to the turn's braces. A turn ends when the provider says the
+        // utterance is over, and that has been observed arriving while the avatar is plainly still
+        // talking; this comes from the decoded audio instead, so it cannot be early. Without it the
+        // microphone opened into the tail of an answer and the agent started interviewing itself.
+        !on || !onStage || !accepting || avatarSpeaking -> Intent.Close
         quietMs > QUIET_MS -> Intent.GiveUp
         else -> Intent.Listen(REARM_MS + retryDelayMs)
     }
