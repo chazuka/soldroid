@@ -66,16 +66,29 @@ The overlap is the point: sentence one is already being spoken while the model i
 sentence three. `agent.speak_end` is still sent once, at the very end, so the provider treats the
 whole answer as a single utterance and reports one `agent.speak_ended`.
 
-Measured end to end on a Galaxy S25 over 4G:
+Measured end to end on a Galaxy S25, by speaking real questions out of a laptop into the handset's
+own microphone rather than by injecting text:
 
 ```
-llm 3782ms/4691ms   tts 4365ms   lips 5425ms/18679ms   2 sentence(s)
+llm 3482ms/5563ms  tts 4130ms  wire 4141ms  lips 4962ms/30517ms  audible 5100ms  claim -138ms  4 sentence(s)
 ```
 
-The first audio frame reached the avatar at 4365 ms — **326 ms before the model finished
-generating**. Time to the lips moving was 5.4 s, of which 3.8 s was the model's own first token.
-Everything this app controls costs about 1.6 s; the rest is `kamartaj.xyz` assembling ~4,800 tokens
-of persona and customer record on every turn.
+The first audio frame reached the avatar at 4130 ms — **1.4 s before the model finished generating**,
+which is the overlap above doing its job. Sound reached the room at 5100 ms, and that mark comes off
+the decoded audio rather than off the provider saying so; see `TurnTrace.claimSkewMs` for why the two
+are not the same thing.
+
+Where that time goes, on `Model 1`, median of the runs above:
+
+| leg | cost | whose |
+|---|---|---|
+| first token | ~3.3 s | the model's |
+| clause + synthesis | ~0.14 s | ours |
+| encoding to the socket | ~0.01 s | ours |
+| render and transport | ~1.07 s ± 0.10 | the avatar provider's |
+
+About 150 ms of the wait belongs to this app. The rest is the model assembling a persona and a
+customer record on every turn, and a renderer that is consistent but not fast.
 
 Steps 3 and 4 are allowed to fail, and when they do the conversation carries on in text — the face
 is an enhancement, never the channel. Long-press the agent's name to see the trace for the last turn.
