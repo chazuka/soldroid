@@ -240,9 +240,17 @@ class LiveAvatarSession(
      * A failure part-way through leaves audio buffered provider-side that would lip-sync as a
      * truncated sentence, so it is cleared with `agent.interrupt` rather than left to play.
      *
-     * @param onFirstFrame called once, as the first frame goes out; the moment worth timing.
+     * @param onFirstFrame called once, before the first frame is encoded; where the avatar leg starts.
+     * @param onFirstFrameSent called once, after that frame has been encoded and handed to the
+     *   socket. The pair brackets this app's own share of the avatar leg — base64 and JSON — so a
+     *   slow first word can be blamed on the right side of the wire. It brackets encoding only:
+     *   `WebSocket.send` enqueues and returns, so the far end is not waited for here.
      */
-    suspend fun speak(frames: Flow<ByteArray>, onFirstFrame: () -> Unit = {}): Utterance =
+    suspend fun speak(
+        frames: Flow<ByteArray>,
+        onFirstFrame: () -> Unit = {},
+        onFirstFrameSent: () -> Unit = {},
+    ): Utterance =
         speaking.withLock {
             // The wait [open] used to do, moved to the one place it actually matters. A frame sent
             // before the provider reports the session connected can be dropped, which shows up as an
@@ -262,8 +270,10 @@ class LiveAvatarSession(
             var sent = 0L
             try {
                 frames.collect { frame ->
-                    if (sent == 0L) onFirstFrame()
+                    val first = sent == 0L
+                    if (first) onFirstFrame()
                     send(CommandDto(CMD_SPEAK, audio = Base64.getEncoder().encodeToString(frame)))
+                    if (first) onFirstFrameSent()
                     sent += frame.size
                 }
             } catch (e: Exception) {
@@ -276,6 +286,14 @@ class LiveAvatarSession(
                 throw LiveAvatarException("refusing to seal an utterance with no audio")
             }
             send(CommandDto(CMD_SPEAK_END))
+            // What is still sitting in OkHttp's buffer once the whole answer has been handed over.
+            //
+            // The one thing the timing marks cannot see. They bracket encoding, because `send`
+            // enqueues and returns, so they would read fast on a handset whose uplink is minutes
+            // behind. A queue that is empty here means the audio really did leave as it was made; a
+            // queue holding most of the utterance means a slow first word is this connection, and
+            // no amount of tuning the provider will move it.
+            Log.i(TAG, "sealed ${sent}B utterance, ${socket?.queueSize() ?: 0}B still queued")
             Utterance(sent, ended)
         }
 

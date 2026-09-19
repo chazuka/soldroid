@@ -307,7 +307,15 @@ class CompanionViewModel @Inject constructor(
             controller.audioMuted.collect { muted -> _state.update { it.copy(muted = muted) } }
         }
         viewModelScope.launch {
-            controller.speaking.collect { speaking -> _state.update { it.copy(avatarSpeaking = speaking) } }
+            controller.speaking.collect { speaking ->
+                // The first time the room carries sound in this turn. Everything else in the avatar
+                // leg is the provider describing itself over a control socket, and that description
+                // has been observed arriving before the lips moved; this one comes off the media
+                // path, so it is the check on the rest. Guarded by the turn so the greeting and any
+                // stray speaker change outside a turn cannot claim it.
+                if (speaking && turnInFlight) mark { copy(audibleMs = audibleMs ?: elapsed()) }
+                _state.update { it.copy(avatarSpeaking = speaking) }
+            }
         }
         viewModelScope.launch {
             controller.reconnecting.collect { down ->
@@ -569,6 +577,7 @@ class CompanionViewModel @Inject constructor(
                                 .onCompletion { clauses.trySend(SpokenCaption(sentence, bytes)) }
                         },
                     onFirstFrame = { mark { copy(firstAudioMs = elapsed()) } },
+                    onFirstFrameSent = { mark { copy(frameSentMs = frameSentMs ?: elapsed()) } },
                 )
             }
         }
@@ -657,7 +666,10 @@ class CompanionViewModel @Inject constructor(
         _state.update { it.copy(phase = TurnPhase.IDLE) }
         // The brain is part of the measurement: an answer is only better than another if you know
         // which one gave it, and how long it took to give it.
-        _state.value.trace?.let { Log.i(TAG, "turn ${_state.value.brain.name}: ${it.summary()}") }
+        // The label, not the enum. The same anonymity the chooser and the telemetry keep: a vendor
+        // name here hands whoever is reading the traces a prior about which brain should be faster,
+        // and comparing them without one is the reason these numbers are collected.
+        _state.value.trace?.let { Log.i(TAG, "turn ${_state.value.brain.label}: ${it.summary()}") }
         recordTurn(
             TurnRules.outcome(
                 answered = text.isNotEmpty(),
