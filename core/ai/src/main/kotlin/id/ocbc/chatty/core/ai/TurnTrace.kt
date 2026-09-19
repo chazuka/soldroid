@@ -42,6 +42,20 @@ data class TurnTrace(
     /** The model stopped generating. */
     val answerCompleteMs: Long? = null,
 
+    /**
+     * The first clause was whole and went to the synthesizer.
+     *
+     * The boundary between two things that were being measured as one. Synthesis cannot start until
+     * a clause is complete, so without this mark the "synthesis" leg silently included however long
+     * the model took to finish its opening sentence — and a wordy turn read as a slow voice.
+     * Measured on two real turns: the same voice looked like 776ms on one and 2,638ms on another,
+     * and the difference was entirely the model.
+     *
+     * It matters because comparing voices is one of the things this app exists to do, and a
+     * comparison that moves when the *model* changes its mind about sentence length is not one.
+     */
+    val firstClauseMs: Long? = null,
+
     /** The first PCM frame reached the avatar — i.e. the synthesizer's first byte, plus our overhead. */
     val firstAudioMs: Long? = null,
 
@@ -68,16 +82,25 @@ data class TurnTrace(
     val complete: Boolean get() = speakEndedMs != null
 
     /**
-     * How long synthesis took to produce something sayable, once the model had given it words.
+     * How long the model took to finish a sentence, once it had started writing.
      *
-     * Derived rather than marked, because there is no separate clock to start: the synthesizer is
-     * handed the first clause the moment one is complete, so the gap between the model's first
-     * token and the first audio frame *is* the synthesis leg plus this app's own clause splitting.
+     * This is the model's doing, not the synthesizer's, and it is the part that used to be charged
+     * to the voice. Kept as its own number because it is also a real cost the customer feels — a
+     * model that opens with a long sentence delays the first sound however fast the voice is.
+     */
+    val clauseMs: Long? get() = both(firstTokenMs, firstClauseMs)
+
+    /**
+     * How long the synthesizer took, from being handed a whole clause to the first audio arriving.
+     *
+     * The voice's own latency, with the model's sentence-writing taken out of it — see
+     * [firstClauseMs] for why that separation had to exist before any voice could be compared to
+     * another.
      *
      * Null until both ends exist. A turn that failed before any audio has no synthesis leg, and
      * reporting zero would put it in the same bucket as an instant one.
      */
-    val ttsMs: Long? get() = both(firstTokenMs, firstAudioMs)
+    val ttsMs: Long? get() = both(firstClauseMs, firstAudioMs)
 
     /**
      * How long the provider took to turn audio into a moving mouth.

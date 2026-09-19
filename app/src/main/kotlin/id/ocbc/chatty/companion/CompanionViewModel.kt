@@ -406,7 +406,16 @@ class CompanionViewModel @Inject constructor(
                         .sentences()
                         // Deliberately not logged. This is the customer's answer — their balances,
                         // their goals — and logcat is readable by anyone with the handset plugged in.
-                        .onEach { mark { copy(sentences = sentences + 1) } }
+                        .onEach {
+                            mark {
+                                copy(
+                                    sentences = sentences + 1,
+                                    // The moment a clause is whole and synthesis can begin. Where
+                                    // the model's work ends and the voice's starts.
+                                    firstClauseMs = firstClauseMs ?: elapsed(),
+                                )
+                            }
+                        }
                         .flatMapConcat { sentence ->
                             val language = turnLanguage
                                 ?: spokenLanguageFor(answer.toString()).also { turnLanguage = it }
