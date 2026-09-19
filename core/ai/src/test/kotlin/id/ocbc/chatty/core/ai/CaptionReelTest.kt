@@ -35,7 +35,48 @@ class CaptionReelTest {
 
         start.complete(Unit)
         advanceUntilIdle()
-        assertEquals(listOf("Saldo kamu aman."), shown)
+        assertEquals("Saldo kamu aman.", shown.last(), "the whole clause has to arrive in the end")
+        job.cancel()
+    }
+
+    @Test
+    fun `a clause is revealed across the time it takes to say it`() = runTest {
+        // Shown whole, a clause jumped ahead of the voice by a sentence and then waited for it to
+        // catch up: in step on average, visibly out of step most of the time. The words are spread
+        // across the audio's own length instead.
+        val clauses = Channel<SpokenCaption>(Channel.UNLIMITED)
+        val shown = mutableListOf<String>()
+
+        val job = launch { revealCaptions(clauses, awaitStart = {}, onCaption = shown::add) }
+        clauses.send(clause("satu dua tiga empat", 4))
+
+        advanceTimeBy(500)
+        assertEquals("satu", shown.last(), "the first word lands as it is said, not the whole line")
+
+        advanceTimeBy(1_000)
+        assertEquals("satu dua", shown.last())
+
+        advanceTimeBy(2_000)
+        assertEquals("satu dua tiga empat", shown.last())
+        job.cancel()
+    }
+
+    @Test
+    fun `a clause still takes exactly as long as its audio`() = runTest {
+        // What keeps the caption from drifting: however the words are spaced inside a clause, the
+        // clause ends where it always would have, so the next one starts in step.
+        val clauses = Channel<SpokenCaption>(Channel.UNLIMITED)
+        val shown = mutableListOf<String>()
+
+        val job = launch { revealCaptions(clauses, awaitStart = {}, onCaption = shown::add) }
+        clauses.send(clause("satu dua tiga empat", 4))
+        clauses.send(clause("lima", 1))
+
+        advanceTimeBy(3_900)
+        assertEquals(false, shown.last().contains("lima"), "the next clause must wait out this one")
+
+        advanceTimeBy(200)
+        assertEquals(true, shown.last().contains("lima"))
         job.cancel()
     }
 

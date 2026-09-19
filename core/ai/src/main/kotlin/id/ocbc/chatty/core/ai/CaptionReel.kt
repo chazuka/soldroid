@@ -29,9 +29,21 @@ suspend fun revealCaptions(
 
     var shown = ""
     for (clause in clauses) {
-        shown = join(shown, clause.text)
-        onCaption(shown)
-        delay(clause.durationMs)
+        // A clause arrives whole but is not said whole. Appearing all at once made the caption
+        // jump ahead of the voice by the length of a sentence and then wait for it to catch up —
+        // the words were in step on average and visibly out of step most of the time.
+        //
+        // The audio's own length is known, so the words are spread across it: each appears roughly
+        // when it is spoken, and the clause still takes exactly as long to reveal as it takes to
+        // say. Drift cannot accumulate, because every clause ends where it would have ended.
+        val words = clause.text.split(' ').filter { it.isNotEmpty() }
+        if (words.isEmpty()) continue
+        val perWord = clause.durationMs / words.size
+        words.forEach { word ->
+            shown = join(shown, word)
+            onCaption(shown)
+            delay(perWord)
+        }
     }
 }
 
