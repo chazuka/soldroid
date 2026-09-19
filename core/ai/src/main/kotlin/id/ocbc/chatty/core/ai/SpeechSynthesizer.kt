@@ -186,19 +186,35 @@ class ElevenLabsSynthesizer(
          * The first frame, deliberately shorter: 200 ms of audio.
          *
          * Every frame but the first is sent while the avatar is already talking, so its size costs
-         * nothing. The first one is the one the customer waits on in silence, and holding it back
-         * until a whole second had rendered was waiting for audio the mouth would not reach for
-         * another 800 ms. Measured against the real endpoint, on the request this client actually
-         * sends: first byte at 225 ms, this lead frame out the door five ms later at 230 ms, against
-         * 304 ms to fill a whole one-second frame — so the customer hears something ~75 ms sooner on
-         * a desk connection, and more on a handset, where the gap is a transfer rather than a
-         * render. Compare like with like if you re-measure: a full frame took 352 ms with the
-         * provider's text normalization left on, and that is a different request.
+         * nothing. The first one is the one the customer waits on in silence.
          *
-         * Not smaller than this. Each frame is a websocket command of its own, and a lead frame of
-         * a few milliseconds would trade the wait for a burst of packets and a renderer that starts
-         * with nothing to buffer — a starved mouth that stalls mid-word, which is the failure a
-         * customer actually notices.
+         * # 200 ms is a measured optimum, not a guess
+         *
+         * This size was chosen to get the first bytes moving sooner, worth about 75 ms against the
+         * synthesis endpoint. The larger effect was somewhere else entirely, and only became
+         * visible once the provider's own leg was being measured separately: how much audio arrives
+         * in the first packet changes when LiveAvatar starts the mouth, by far more than it changes
+         * when the audio leaves here.
+         *
+         * Measured on a Galaxy S25, time from the first frame sent to the provider reporting lips:
+         *
+         * ```
+         *   50 ms first frame   1110, 1562 ms          mean 1336
+         *  200 ms first frame    752, 779, 816,
+         *                        834, 849 ms           mean  806   <- here
+         * 1000 ms first frame   1377, 1174 ms          mean 1276
+         * ```
+         *
+         * Both directions are worse, and the curve has a floor in the middle: too large a first
+         * packet delays the send, too small a one leaves the renderer with nothing to start on and
+         * it waits for the next. So this constant is worth ~470 ms of the turn, which is several
+         * times what it was introduced for.
+         *
+         * The ~800 ms that remains does not move with anything this app controls. That is the
+         * provider's own pipeline, and it is a question for them rather than a constant here.
+         *
+         * Re-measure before changing it, and re-measure `avatar_ms` rather than the synthesis leg —
+         * the synthesis leg barely responds, which is why this sat unnoticed.
          */
         const val LEAD_FRAME_BYTES = SAMPLE_RATE_HZ * BYTES_PER_SAMPLE / 5
 
