@@ -85,8 +85,6 @@ import id.ocbc.chatty.core.ai.TurnPhase
 import id.ocbc.chatty.core.ui.theme.StageColors
 import id.ocbc.chatty.core.ui.theme.rememberReducedMotion
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.requiredHeight
@@ -691,54 +689,23 @@ private fun Exchange(
     val live = listening && partial.isNotEmpty()
     val question = if (live) liveTail(partial) else lastQuestion
 
-    // Over a face the words are a caption, not a document: two lines of question and two of answer,
-    // always the newest two, the way broadcast subtitles behave. The customer is *listening* — the
-    // text is there to confirm what was heard and to carry the room when the audio is muted, and a
-    // wall of it buried the picture it was drawn on.
+    // On the stage the words are a caption, not a document: two lines of question and two of
+    // answer, always the newest two, the way broadcast subtitles behave. The customer is
+    // *listening* — the text is there to confirm what was heard and to carry the room when the
+    // audio is muted, and a wall of it buries whatever it is drawn on.
     //
-    // Off the stage there is nothing to bury, so the answer stays whole and scrolls.
-    val caption = mode == CompanionMode.VIDEO
-
-    val scroll = rememberScrollState()
-    // Follow the answer down as it is written, so the line on screen is the line being spoken. The
-    // agent is talking through this text at the same time, and a reader left at the top would be
-    // looking at a sentence that finished several seconds ago. Only while it is still streaming —
-    // once the answer is whole the view stays where the customer left it.
+    // This used to apply to [CompanionMode.VIDEO] alone, which left [CompanionMode.VOICE] showing
+    // the whole answer written out beneath the same controls: one stage, two treatments, and the
+    // full text repeating what the caption above it had already said. The two are one composition
+    // differing only in what stands at their centre — a face or the orb — so they read alike now.
     //
-    // Nothing to follow when the text is clamped: the tail is always on screen by construction, and
-    // an animation running per token for no visible effect is work the stage cannot spare.
-    LaunchedEffect(answer, streaming, caption) {
-        if (streaming && !caption) scroll.animateScrollTo(scroll.maxValue)
-    }
+    // Reading the whole answer is what [CompanionMode.TEXT] is for, and it is one tap away.
 
     Column(
-        modifier = modifier
-            .widthIn(max = EXCHANGE_MAX_WIDTH)
-            .then(
-                if (caption) {
-                    // Clamped text needs neither, and both cost: the fade masks through an
-                    // offscreen layer every frame, and the scroll container measures content that
-                    // can no longer overflow it.
-                    Modifier
-                } else {
-                    Modifier
-                        // A line sliced off at the edge of a scroll region reads as a rendering
-                        // fault. Fading it out says the text continues and that a drag will reach
-                        // it — the only affordance a scroll region with no scrollbar has.
-                        //
-                        // The fade masks the content's alpha rather than painting a scrim over it.
-                        // A scrim has to match the background it sits on, and the background here is
-                        // a gradient: any single colour shows up as a lighter band. Masking is
-                        // background-independent, so it is correct at every point on the gradient
-                        // and in both themes.
-                        .fadingEdges(top = scroll.canScrollBackward, bottom = scroll.canScrollForward)
-                        // The answer can run past the space reserved for it — a long reply, a large
-                        // system font — and when it does the customer should be able to read the
-                        // rest rather than have it silently cut. A drag here is a scroll and a tap
-                        // still reaches the stage behind, so barge-in survives.
-                        .verticalScroll(scroll)
-                },
-            ),
+        // No scroll container and no fading edges: clamped text cannot overflow, so both were
+        // paying for an affordance nothing needed — the fade masks through an offscreen layer every
+        // frame, and the scroll measures content that can no longer be taller than its box.
+        modifier = modifier.widthIn(max = EXCHANGE_MAX_WIDTH),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
@@ -749,32 +716,15 @@ private fun Exchange(
             } else {
                 MaterialTheme.typography.headlineSmall
             }
-            if (caption) {
-                TailText(
-                    text = AnnotatedString(quoted),
-                    maxLines = CAPTION_MAX_LINES,
-                    style = questionStyle,
-                    color = Color.White,
-                    modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
-                )
-            } else {
-            Text(
-                text = quoted,
+            // The newest two lines, live or settled. A live partial is never cut at the front —
+            // [liveTail] has already trimmed it there, which is the end a speaker needs to see.
+            TailText(
+                text = AnnotatedString(quoted),
+                maxLines = CAPTION_MAX_LINES,
                 style = questionStyle,
                 color = Color.White,
-                textAlign = TextAlign.Center,
-                // A settled question is history and two lines of it is plenty; the whole thing is a
-                // tap away in text mode. A live partial is never cut here — [liveTail] has already
-                // trimmed it from the front, which is the end a speaker needs to see.
-                // Four lines of live transcript over the face, as asked: enough to watch a long
-                // question land without the words climbing over the picture they are drawn on.
-                // A settled question is history and two lines of it is plenty — the whole thing is a
-                // tap away in text mode.
-                maxLines = if (live) LIVE_QUESTION_MAX_LINES else QUESTION_MAX_LINES,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(if (listening) LIVE_QUESTION_ALPHA else 1f),
             )
-            }
         }
         // Three dots while the model composes. There is a measured ~3.8 s before the first token,
         // and without a sign of life that gap reads as a dropped request.
@@ -793,11 +743,7 @@ private fun Exchange(
                 MaterialTheme.typography.bodyLarge
             }
             val answerColor = Color.White.copy(alpha = ANSWER_ALPHA)
-            if (caption) {
-                TailText(text = body, maxLines = CAPTION_MAX_LINES, style = answerStyle, color = answerColor)
-            } else {
-                Text(text = body, style = answerStyle, color = answerColor, textAlign = TextAlign.Center)
-            }
+            TailText(text = body, maxLines = CAPTION_MAX_LINES, style = answerStyle, color = answerColor)
         }
         // The turn failed and produced nothing. On the stage there is no thread to fall back on, so
         // the way out has to be here or the customer is left looking at a face that said nothing.
@@ -895,52 +841,6 @@ private fun TailText(
         modifier = modifier,
     )
 }
-
-/**
- * Fades the content out at whichever edges are marked, without touching the background.
- *
- * Used on the stage's scrolling exchange. Both edges are wanted because the view follows the answer
- * down as it is written: once it has, the question is above the fold and its last line is the one
- * being sliced.
- *
- * ```
- * Column(Modifier.fadingEdges(top = scroll.canScrollBackward, bottom = scroll.canScrollForward)
- *     .verticalScroll(scroll)) { … }
- * ```
- *
- * The offscreen compositing strategy is not optional: [BlendMode.DstIn] multiplies against what is
- * already in the layer, and without its own layer that is the whole window rather than this
- * composable's content.
- */
-private fun Modifier.fadingEdges(top: Boolean, bottom: Boolean): Modifier = this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
-        val fade = EXCHANGE_FADE.toPx()
-        if (top) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(Color.Transparent, Color.Black),
-                    startY = 0f,
-                    endY = fade,
-                ),
-                size = Size(size.width, fade),
-                blendMode = BlendMode.DstIn,
-            )
-        }
-        if (bottom) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(Color.Black, Color.Transparent),
-                    startY = size.height - fade,
-                    endY = size.height,
-                ),
-                topLeft = Offset(0f, size.height - fade),
-                size = Size(size.width, fade),
-                blendMode = BlendMode.DstIn,
-            )
-        }
-    }
 
 /**
  * The canvas's three circles: text mode, the microphone, and Stop — each under its own word.
@@ -1120,10 +1020,6 @@ private fun liveTail(text: String): String {
 
 /** About four lines of the stage's question type, which is what [liveTail] is trimming to fit. */
 private const val LIVE_QUESTION_MAX_CHARS = 160
-
-private const val LIVE_QUESTION_MAX_LINES = 3
-
-private const val QUESTION_MAX_LINES = 2
 
 /**
  * Lines of question and of answer kept on the stage, as captions.
