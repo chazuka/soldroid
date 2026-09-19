@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.androidx.baselineprofile)
+    alias(libs.plugins.sentry.android)
 }
 
 /**
@@ -102,6 +103,66 @@ val releaseKeystore: File? = secret("KEYSTORE_PATH")
     .takeIf(String::isNotEmpty)
     ?.let { path -> File(path).takeIf(File::isAbsolute) ?: rootProject.file(path) }
     ?.takeIf(File::exists)
+
+/**
+ * Readable stack traces for release crashes, and nothing else.
+ *
+ * # Why this plugin is here at all
+ *
+ * The release build is minified, so a crash arrives as obfuscated frames that name nothing. This
+ * plugin's one job here is to upload R8's mapping file so those frames are readable again. The SDK
+ * itself is wired by hand in `AppModule` and `ChattyApplication`.
+ *
+ * # Why almost everything it offers is switched off
+ *
+ * Left to its defaults — or installed by `sentry-wizard` — it would also write the DSN into the
+ * manifest and auto-instrument OkHttp through bytecode. Both are wrong here, and quietly:
+ *
+ *  - Manifest DSN means the SDK starts from a ContentProvider, *before* `Application.onCreate` and
+ *    therefore before [TelemetryPolicy] is applied. There would be a window governed by the SDK's
+ *    own defaults, which is exactly what that policy exists to prevent.
+ *  - Bytecode instrumentation would add OkHttp spans on top of the interceptor and event listener
+ *    `AppModule` already installs: every request timed twice, and double the spans against quota.
+ *
+ * Uploading is off unless this build has a token, so a clone with no Sentry credentials — which is
+ * every developer's and every CI job that is not publishing — builds release exactly as before.
+ */
+sentry {
+    // Off: the SDK dependency is declared explicitly, and the DSN belongs in one explicit init.
+    autoInstallation.enabled.set(false)
+
+    // Off: AppModule already wires the OkHttp interceptor and event listener by hand.
+    tracingInstrumentation.enabled.set(false)
+
+    // Off, and the reason is not duplication. Source context uploads the source *code* to the
+    // backend so it can be shown beside a stack trace. This is a bank's codebase.
+    includeSourceContext.set(false)
+
+    // The mapping file only travels when this build has everything needed to send it. All three
+    // are required — a token alone fails the build at upload time, which is a confusing way to
+    // discover that a slug is missing — so an incomplete set is treated as "not configured" and
+    // says so once, rather than breaking a release build somebody was in the middle of cutting.
+    val token = secret("SENTRY_AUTH_TOKEN")
+    val slug = secret("SENTRY_ORG")
+    val project = secret("SENTRY_PROJECT")
+    val canUpload = token.isNotEmpty() && slug.isNotEmpty() && project.isNotEmpty()
+    if (token.isNotEmpty() && !canUpload) {
+        logger.warn(
+            "SENTRY_AUTH_TOKEN is set but SENTRY_ORG or SENTRY_PROJECT is not: the R8 mapping " +
+                "will not be uploaded, and release crashes will arrive obfuscated."
+        )
+    }
+    includeProguardMapping.set(canUpload)
+    autoUploadProguardMapping.set(canUpload)
+    if (canUpload) {
+        authToken.set(token)
+        org.set(slug)
+        projectName.set(project)
+    }
+
+    // Debug builds are not minified, so there is no mapping to upload and nothing to gain.
+    ignoredBuildTypes.set(setOf("debug"))
+}
 
 android {
     namespace = "id.ocbc.chatty"
