@@ -239,15 +239,22 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
 
-            // Handsets only. LiveKit's WebRTC library ships a ~12-16MB native binary per ABI, and
-            // the two x86 variants exist for emulators — which never receive a distributed APK.
-            // Dropping them halves the download a tester pays for.
+            // 64-bit handsets only. Native code is 81% of this APK — LiveKit's WebRTC binary alone
+            // is 12MB per ABI — so which ABIs ship is by far the largest size decision available,
+            // and everything else put together is rounding error beside it.
+            //
+            // Measured: dropping `armeabi-v7a` took the release APK from 23.75MB to 16.77MB, a
+            // saving of 6.97MB or 29.4%. What it costs is 32-bit-only devices, and this app cannot
+            // meet one: `minSdk` is 29, every handset shipped since 2019 is 64-bit, and a customer
+            // demo runs on current hardware. A device that genuinely needed it would fail to
+            // install rather than misbehave, which is the right way round for a failure nobody
+            // expects to see.
             //
             // Scoped to `release` on purpose: debug builds keep every ABI, so an emulator remains a
             // working development target. If a release build ever has to run on one, build the
             // debug variant instead of widening this.
             ndk {
-                abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+                abiFilters += setOf("arm64-v8a")
             }
 
             // Beta builds are sideloaded, not uploaded to Play, so the only thing the key has to
