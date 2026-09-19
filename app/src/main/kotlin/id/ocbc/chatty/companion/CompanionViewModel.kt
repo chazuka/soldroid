@@ -43,6 +43,9 @@ import kotlinx.coroutines.flow.onCompletion
 import id.ocbc.chatty.core.ai.Brain
 import id.ocbc.chatty.core.ai.Brains
 import id.ocbc.chatty.core.ai.revealCaptions
+import id.ocbc.chatty.core.ai.telemetry.TurnEvent
+import id.ocbc.chatty.core.ai.telemetry.TurnOutcome
+import id.ocbc.chatty.core.ai.telemetry.TurnSink
 
 /**
  * A transient line for the customer.
@@ -172,6 +175,7 @@ class CompanionViewModel @Inject constructor(
     private val sessions: AvatarSessionFactory,
     private val controller: AvatarController,
     private val signals: ConversationSignals,
+    private val turns: TurnSink,
     @param:ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
 
@@ -205,6 +209,27 @@ class CompanionViewModel @Inject constructor(
 
     /** The caption being revealed, kept so a new turn can stop the previous one mid-sentence. */
     private var captionJob: Job? = null
+
+    /**
+     * Whether the brain's briefing material was in hand before the first question.
+     *
+     * Recorded rather than assumed: the warm-up races the customer, and a customer who asks
+     * immediately pays for the fetch the warm-up was meant to have done. Without this the
+     * optimisation is unfalsifiable in the field — it only ever looks good on the bench where it
+     * was measured.
+     */
+    private var warmed = false
+
+    /**
+     * Whether the customer cut this turn short.
+     *
+     * Barge-in does not fail a turn — the avatar stops, the pending utterance completes, and
+     * everything unwinds the ordinary way — so by the time the turn ends there is nothing left to
+     * say it was interrupted. Without this flag a cut-off turn is indistinguishable from one the
+     * agent finished, and the two mean opposite things: one is the feature working, the other is a
+     * short answer.
+     */
+    private var interrupted = false
 
     init {
         viewModelScope.launch {
@@ -256,12 +281,22 @@ class CompanionViewModel @Inject constructor(
         viewModelScope.launch { openSession(agent) }
         // Warm the chosen brain's brief while the screen and the avatar session are still being
         // set up, so the first question does not pay for it. See [ChatClient.warm].
-        viewModelScope.launch { brains[brain].warm(agent.id) }
+        warmed = false
+        viewModelScope.launch {
+            brains[brain].warm(agent.id)
+            warmed = true
+        }
         startRefreshWatchdog(agent)
     }
 
-    /** Asks the open agent a question. Ignored unless the previous turn has finished. */
-    fun ask(question: String) {
+    /**
+     * Asks the open agent a question. Ignored unless the previous turn has finished.
+     *
+     * [listenedMs] is how long the recogniser took to decide the question had ended — the one leg
+     * of a turn that happens before the turn does. Null when the question was typed, which has no
+     * listening to account for.
+     */
+    fun ask(question: String, listenedMs: Long? = null) {
         val current = _state.value
         val agent = current.agent ?: return
         val text = question.trim()
@@ -301,7 +336,7 @@ class CompanionViewModel @Inject constructor(
                 caption = null,
                 phase = TurnPhase.THINKING,
                 retryable = null,
-                trace = TurnTrace(askedAtMs = System.currentTimeMillis()),
+                trace = TurnTrace(askedAtMs = System.currentTimeMillis(), listenedMs = listenedMs),
             )
         }
 
@@ -329,6 +364,11 @@ class CompanionViewModel @Inject constructor(
         // speed they are spoken. Unlimited because the supply runs far ahead of the playback it is
         // describing — that gap is the entire reason this exists — and a full buffer would stall the
         // audio to keep a caption tidy, which is the wrong way round.
+        // Told before any work is done, so a backend that times a turn by watching it — and that is
+        // how the network breakdown is collected — has something for those spans to attach to.
+        turns.begin()
+        interrupted = false
+
         val clauses = Channel<SpokenCaption>(Channel.UNLIMITED)
         captionJob?.cancel()
         captionJob = viewModelScope.launch { revealCaption(clauses) }
@@ -426,6 +466,14 @@ class CompanionViewModel @Inject constructor(
             }
             if (ending.replaceSession) replaceSession(agent)
             Log.w(TAG, "turn failed", failure)
+            recordTurn(
+                TurnRules.outcome(
+                    answered = text.isNotEmpty(),
+                    spoke = false,
+                    interrupted = interrupted,
+                    network = failure.isNetwork(),
+                ),
+            )
             return
         }
 
@@ -444,6 +492,38 @@ class CompanionViewModel @Inject constructor(
         // The brain is part of the measurement: an answer is only better than another if you know
         // which one gave it, and how long it took to give it.
         _state.value.trace?.let { Log.i(TAG, "turn ${_state.value.brain.name}: ${it.summary()}") }
+        recordTurn(
+            TurnRules.outcome(
+                answered = text.isNotEmpty(),
+                spoke = true,
+                interrupted = interrupted,
+                network = false,
+            ),
+        )
+    }
+
+    /**
+     * Hands the finished turn to whoever is collecting them.
+     *
+     * Called on every path out of a turn, including the failures, because a backend that only hears
+     * about the turns that worked reports a pipeline that never breaks. Nothing here can throw into
+     * the turn: the sink's contract is that it does not, and the trace is gone by the next question
+     * either way.
+     */
+    private fun recordTurn(outcome: TurnOutcome) {
+        val state = _state.value
+        val trace = state.trace ?: return
+        turns.record(
+            TurnEvent(
+                trace = trace,
+                brain = state.brain.name,
+                agent = state.agent?.id.orEmpty(),
+                language = state.language.tag,
+                handsfree = state.handsfree,
+                warmHit = warmed,
+                outcome = outcome,
+            ),
+        )
     }
 
     /**
@@ -515,6 +595,7 @@ class CompanionViewModel @Inject constructor(
     /** Cuts the current answer short. The turn ends where the customer stopped it. */
     fun interrupt() {
         if (!_state.value.interruptible) return
+        interrupted = true
         // The caption stops where the voice stopped. Letting it run on would show the customer the
         // words they just cut off, which is the opposite of what pressing stop meant.
         captionJob?.cancel()

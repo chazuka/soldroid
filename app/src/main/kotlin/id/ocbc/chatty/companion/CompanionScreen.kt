@@ -245,7 +245,7 @@ private fun CompanionScreen(
     mode: CompanionMode,
     controller: id.ocbc.chatty.core.avatar.AvatarController,
     onModeChange: (CompanionMode) -> Unit,
-    onAsk: (String) -> Unit,
+    onAsk: (question: String, listenedMs: Long?) -> Unit,
     onRetry: () -> Unit,
     onInterrupt: () -> Unit,
     onSpeechProblem: (SpeechProblem) -> Unit,
@@ -315,11 +315,11 @@ private fun CompanionScreen(
     var micRetryDelayMs by remember { mutableLongStateOf(0L) }
 
     val speech = rememberSpeechInput(
-        onResult = { question ->
+        onResult = { question, listenedMs ->
             lastHeardAtMs = System.currentTimeMillis()
             micRetryDelayMs = 0L
-            Log.i(HANDSFREE_TAG, "heard a question of ${question.length} chars")
-            onAsk(question)
+            Log.i(HANDSFREE_TAG, "heard a question of ${question.length} chars in ${listenedMs}ms")
+            onAsk(question, listenedMs)
         },
         onProblem = { problem ->
             // Both decisions belong to [Handsfree]: what the failure really was, and what to do
@@ -534,7 +534,7 @@ private fun CompanionScreen(
 @Composable
 private fun TextMode(
     state: CompanionUiState,
-    onAsk: (String) -> Unit,
+    onAsk: (question: String, listenedMs: Long?) -> Unit,
     onRetry: () -> Unit,
     onShowFace: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -596,7 +596,7 @@ private fun TextMode(
                 // Shortcuts only while the thread is empty. Once there is a conversation they are
                 // clutter: the customer has already shown they know what to ask.
                 if (state.transcript.isEmpty() && state.draft.isNullOrEmpty()) {
-                    item { Starters(enabled = state.acceptingInput, onPick = onAsk) }
+                    item { Starters(enabled = state.acceptingInput, onPick = { onAsk(it, null) }) }
                 }
             }
 
@@ -605,7 +605,7 @@ private fun TextMode(
                 draft = draft,
                 onDraftChange = { draft = it },
                 onSend = {
-                    onAsk(draft)
+                    onAsk(draft, null)
                     draft = ""
                 },
                 onShowFace = onShowFace,

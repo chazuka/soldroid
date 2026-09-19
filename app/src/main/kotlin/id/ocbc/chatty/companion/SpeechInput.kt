@@ -117,6 +117,8 @@ interface SpeechInput {
  *
  * ```
  * val speech = rememberSpeechInput(onResult = viewModel::ask, onProblem = viewModel::onSpeechProblem)
+ * // onResult also reports how long the recogniser took to decide, which is the one leg of a turn
+ * // that happens before the turn starts. See RecognitionCallbacks.stoppedTalkingAtMs.
  * MicButton(
  *     enabled = speech.available,
  *     onPress = { speech.start() },
@@ -127,7 +129,7 @@ interface SpeechInput {
  */
 @Composable
 fun rememberSpeechInput(
-    onResult: (String) -> Unit,
+    onResult: (question: String, listenedMs: Long?) -> Unit,
     onProblem: (SpeechProblem) -> Unit,
     languageTag: String = Language.INDONESIAN.tag,
 ): SpeechInput {
@@ -326,9 +328,22 @@ private class RecognitionCallbacks(
     private val listening: MutableState<Boolean>,
     private val partial: MutableState<String>,
     private val discarding: MutableState<Boolean>,
-    private val onResult: (String) -> Unit,
+    private val onResult: (question: String, listenedMs: Long?) -> Unit,
     private val onProblem: (SpeechProblem) -> Unit,
 ) : RecognitionListener {
+
+    /**
+     * When the recogniser decided the customer had stopped talking.
+     *
+     * The start of the only leg of a turn that happens before the turn does: everything between
+     * here and [onResults] is the recogniser making up its mind, and in handsfree that includes the
+     * fixed silence it waits out before it will call a sentence finished. It was invisible for the
+     * life of this app — the trace begins when the *question arrives* — which made the wait the
+     * customer feels most sharply the one nobody could put a number on.
+     *
+     * Null when the engine never reported an end of speech, which some implementations do not.
+     */
+    private var stoppedTalkingAtMs: Long? = null
 
     /** True once for the one callback that a [SpeechInput.cancel] is still going to produce. */
     private fun cancelled(): Boolean = discarding.value.also { discarding.value = false }
@@ -336,18 +351,21 @@ private class RecognitionCallbacks(
     override fun onResults(results: Bundle?) {
         listening.value = false
         partial.value = ""
+        val listenedMs = stoppedTalkingAtMs?.let { System.currentTimeMillis() - it }
+        stoppedTalkingAtMs = null
         if (cancelled()) return
         val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
             ?.trim()
             .orEmpty()
-        if (text.isEmpty()) onProblem(SpeechProblem.NO_MATCH) else onResult(text)
+        if (text.isEmpty()) onProblem(SpeechProblem.NO_MATCH) else onResult(text, listenedMs)
     }
 
     override fun onError(error: Int) {
         listening.value = false
         partial.value = ""
+        stoppedTalkingAtMs = null
         if (cancelled()) return
         onProblem(
             when (error) {
@@ -366,7 +384,9 @@ private class RecognitionCallbacks(
     override fun onBeginningOfSpeech() = Unit
     override fun onRmsChanged(rmsdB: Float) = Unit
     override fun onBufferReceived(buffer: ByteArray?) = Unit
-    override fun onEndOfSpeech() = Unit
+    override fun onEndOfSpeech() {
+        stoppedTalkingAtMs = System.currentTimeMillis()
+    }
     override fun onPartialResults(partialResults: Bundle?) {
         if (discarding.value) return
         partialResults

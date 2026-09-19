@@ -127,6 +127,9 @@ android {
         // so the app still runs for anyone who only has the demo API's key.
         buildConfigField("String", "ANTHROPIC_API_KEY", "\"${secret("ANTHROPIC_API_KEY")}\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"${secret("OPENAI_API_KEY")}\"")
+        // Telemetry is opt-in by configuration: no DSN means turns are written to logcat and go no
+        // further. See TelemetryPolicy for what is sent when there is one.
+        buildConfigField("String", "SENTRY_DSN", "\"${secret("SENTRY_DSN")}\"")
     }
 
     buildFeatures {
@@ -256,6 +259,8 @@ tasks.register("verifyReleaseVersion") {
 
 
 dependencies {
+    implementation(libs.sentry.android)
+    implementation(libs.sentry.okhttp)
     implementation(project(":core:ai"))
     implementation(project(":core:avatar"))
     implementation(project(":core:ui"))
