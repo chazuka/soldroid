@@ -92,14 +92,16 @@ class HandsfreeTest {
     @Test
     fun `the microphone is shut for the whole of a turn`() {
         // The agent speaks through the same handset the microphone is in.
-        val intent = Handsfree.intent(on = true, onStage = true, accepting = false, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0)
+        val intent = Handsfree.intent(on = true, onStage = true, accepting = false, avatarSpeaking = false, reconnecting = false,
+                avatarOpening = false, quietMs = 0, retryDelayMs = 0)
 
         assertEquals(Handsfree.Intent.Close("a turn is in flight"), intent)
     }
 
     @Test
     fun `the thread gets no microphone`() {
-        val intent = Handsfree.intent(on = true, onStage = false, accepting = true, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0)
+        val intent = Handsfree.intent(on = true, onStage = false, accepting = true, avatarSpeaking = false, reconnecting = false,
+                avatarOpening = false, quietMs = 0, retryDelayMs = 0)
 
         assertEquals(Handsfree.Intent.Close("not on the stage"), intent)
     }
@@ -108,7 +110,8 @@ class HandsfreeTest {
     fun `an armed and idle stage opens the microphone`() {
         assertEquals(
             Handsfree.Intent.Listen(Handsfree.REARM_MS),
-            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, reconnecting = false,
+                avatarOpening = false, quietMs = 0, retryDelayMs = 0),
         )
     }
 
@@ -122,6 +125,7 @@ class HandsfreeTest {
                 accepting = true,
                 avatarSpeaking = false,
                 reconnecting = false,
+                avatarOpening = false,
                 quietMs = 0,
                 retryDelayMs = Handsfree.FAULT_BACKOFF_MS,
             ),
@@ -138,6 +142,7 @@ class HandsfreeTest {
                 accepting = true,
                 avatarSpeaking = false,
                 reconnecting = false,
+                avatarOpening = false,
                 quietMs = Handsfree.QUIET_MS + 1,
                 retryDelayMs = 0,
             ),
@@ -150,7 +155,8 @@ class HandsfreeTest {
         // face-down on a desk while the customer considers the answer.
         assertEquals(
             Handsfree.Intent.Listen(Handsfree.REARM_MS),
-            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, reconnecting = false, quietMs = 60_000, retryDelayMs = 0),
+            Handsfree.intent(on = true, onStage = true, accepting = true, avatarSpeaking = false, reconnecting = false,
+                avatarOpening = false, quietMs = 60_000, retryDelayMs = 0),
         )
     }
 
@@ -182,6 +188,7 @@ class HandsfreeTest {
                 accepting = true,
                 avatarSpeaking = true,
                 reconnecting = false,
+                avatarOpening = false,
                 quietMs = 0,
                 retryDelayMs = 0,
             )
@@ -199,6 +206,47 @@ class HandsfreeTest {
                 accepting = true,
                 avatarSpeaking = false,
                 reconnecting = false,
+                avatarOpening = false,
+                quietMs = 0,
+                retryDelayMs = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun `the microphone stays shut while a provider session is being opened`() {
+        // Not about the answer, about the microphone. Negotiating the WebRTC connection contends
+        // with whoever holds the audio input: a listen that began 670ms into a 1,911ms open died
+        // 56ms later with ERROR_CLIENT, and the recovery backoff on top turned one wasted start
+        // into seconds of a microphone that looked open and heard nothing.
+        val intent = Handsfree.intent(
+            on = true,
+            onStage = true,
+            accepting = true,
+            avatarSpeaking = false,
+            reconnecting = false,
+            avatarOpening = true,
+            quietMs = 0,
+            retryDelayMs = 0,
+        )
+
+        assertEquals(Handsfree.Intent.Close("the avatar session is being opened"), intent)
+    }
+
+    @Test
+    fun `an open that finishes lets the microphone back`() {
+        // The flag is lowered in a finally, because a failed open that left it raised would be
+        // handsfree switched on and permanently deaf, which is the exact class of bug this file
+        // exists for.
+        assertEquals(
+            Handsfree.Intent.Listen(Handsfree.REARM_MS),
+            Handsfree.intent(
+                on = true,
+                onStage = true,
+                accepting = true,
+                avatarSpeaking = false,
+                reconnecting = false,
+                avatarOpening = false,
                 quietMs = 0,
                 retryDelayMs = 0,
             ),
@@ -215,6 +263,7 @@ class HandsfreeTest {
                 accepting = true,
                 avatarSpeaking = false,
                 reconnecting = true,
+                avatarOpening = false,
                 quietMs = 0,
                 retryDelayMs = 0,
             )

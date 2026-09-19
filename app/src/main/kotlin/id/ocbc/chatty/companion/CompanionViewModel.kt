@@ -104,6 +104,16 @@ data class CompanionUiState(
      */
     val reconnecting: Boolean = false,
 
+    /**
+     * A provider session is being stood up right now.
+     *
+     * Not shown anywhere. It exists because negotiating a WebRTC connection contends with whoever
+     * is holding the audio input on this handset: a listen that began 670ms into a 1,911ms session
+     * open died 56ms later with ERROR_CLIENT, which costs a recovery backoff on top of the wasted
+     * listen. The microphone waits the open out instead.
+     */
+    val avatarOpening: Boolean = false,
+
     /** How the connection is holding up. Recorded with the turn, never shown. */
     val connection: AvatarConnection = AvatarConnection.UNKNOWN,
     val muted: Boolean = false,
@@ -971,6 +981,9 @@ class CompanionViewModel @Inject constructor(
      */
     private suspend fun openSession(agent: Agent): Boolean {
         val startedAt = System.currentTimeMillis()
+        // Raised for the whole negotiation and lowered however it ends, because the microphone is
+        // held shut on it and a flag left up by a failure would be handsfree gone deaf for good.
+        _state.update { it.copy(avatarOpening = true) }
         val opening = sessions.create()
         session = opening
         sessionEvents?.cancel()
@@ -1011,22 +1024,26 @@ class CompanionViewModel @Inject constructor(
             }
         }
 
-        return runCatching { opening.open(agent.avatar.avatarId) }.fold(
-            onSuccess = { stream ->
-                Log.i(TAG, "stage: session open in ${System.currentTimeMillis() - startedAt}ms")
-                attachedAtMs = System.currentTimeMillis()
-                controller.attach(stream)
-                true
-            },
-            onFailure = {
-                // A billed session may be half-open; drop it rather than leave it running.
-                session = null
-                applicationScope.launch { opening.close() }
-                _state.update { it.copy(avatarLive = false, notice = notice(R.string.avatar_unavailable)) }
-                Log.w(TAG, "could not open an avatar session", it)
-                false
-            },
-        )
+        return try {
+            runCatching { opening.open(agent.avatar.avatarId) }.fold(
+                onSuccess = { stream ->
+                    Log.i(TAG, "stage: session open in ${System.currentTimeMillis() - startedAt}ms")
+                    attachedAtMs = System.currentTimeMillis()
+                    controller.attach(stream)
+                    true
+                },
+                onFailure = {
+                    // A billed session may be half-open; drop it rather than leave it running.
+                    session = null
+                    applicationScope.launch { opening.close() }
+                    _state.update { it.copy(avatarLive = false, notice = notice(R.string.avatar_unavailable)) }
+                    Log.w(TAG, "could not open an avatar session", it)
+                    false
+                },
+            )
+        } finally {
+            _state.update { it.copy(avatarOpening = false) }
+        }
     }
 
     /**

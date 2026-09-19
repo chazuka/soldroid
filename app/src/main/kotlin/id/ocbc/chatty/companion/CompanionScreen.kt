@@ -406,7 +406,7 @@ private fun CompanionScreen(
     // The avatar going quiet is a reason to re-evaluate, so it is part of the condition rather than
     // something the effect would have to be woken for.
     val wantsMic = state.handsfree && onStage && state.acceptingInput &&
-        !state.avatarSpeaking && !state.reconnecting
+        !state.avatarSpeaking && !state.reconnecting && !state.avatarOpening
 
     // Handsfree can be switched on before any question has ever been heard this session, when
     // `lastHeardAtMs` is still its initial zero. Reset it here so the quiet clock below starts
@@ -444,6 +444,7 @@ private fun CompanionScreen(
             accepting = state.acceptingInput,
             avatarSpeaking = state.avatarSpeaking,
             reconnecting = state.reconnecting,
+            avatarOpening = state.avatarOpening,
             quietMs = System.currentTimeMillis() - lastHeardAtMs,
             retryDelayMs = micRetryDelayMs,
         )) {
