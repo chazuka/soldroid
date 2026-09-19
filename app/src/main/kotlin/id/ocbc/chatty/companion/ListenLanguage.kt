@@ -71,13 +71,29 @@ internal object ListenLanguage {
      * in the language being listened for is the strongest available signal that it is in the other
      * one, because the alternative explanations — a cough, a passing truck — do not repeat.
      *
+     * [proven] is whether this ear has actually transcribed something in this conversation yet, and
+     * it is what the threshold turns on. Once the ear has been shown to work, a failure is more
+     * likely to be a cough or a passing truck than a language change, so it takes two. Before that
+     * there is no evidence at all that the ear is right, the switch is only ever a default someone
+     * may not have touched, and the first failure is already the best information available.
+     *
+     * That case is not a corner. It is the most common way this app is first used: the switch sits
+     * where it was left, the customer speaks whichever language they think in, and the opening
+     * question is the one that fails. Making them repeat themselves twice before being heard is the
+     * first impression, and for this product the first impression is the product.
+     *
      * ```
-     * val decision = ListenLanguage.afterFailure(current = Language.ENGLISH, failures = 2)
-     * // Decision(language = INDONESIAN, streak = 0)
+     * ListenLanguage.afterFailure(Language.ENGLISH, failures = 1, proven = false)
+     * // Decision(INDONESIAN, 0) -- nothing has worked yet, so one failure is enough
+     *
+     * ListenLanguage.afterFailure(Language.ENGLISH, failures = 1, proven = true)
+     * // Decision(ENGLISH, 1)   -- this ear works; one failure is noise, wait for a second
      * ```
      */
-    fun afterFailure(current: Language, failures: Int): Decision =
-        if (failures >= SWITCH_AFTER) Decision(current.toggled(), 0) else Decision(current, failures)
+    fun afterFailure(current: Language, failures: Int, proven: Boolean): Decision {
+        val enough = if (proven) SWITCH_AFTER else SWITCH_AFTER_UNPROVEN
+        return if (failures >= enough) Decision(current.toggled(), 0) else Decision(current, failures)
+    }
 
     /** What [next] decided, and the evidence to carry forward. */
     data class Decision(val language: Language, val streak: Int)
@@ -89,4 +105,12 @@ internal object ListenLanguage {
      * mis-heard — and lowering it to one is the behaviour this exists to prevent.
      */
     private const val SWITCH_AFTER = 2
+
+    /**
+     * Failures needed before the ear moves when it has never yet been shown to work.
+     *
+     * One. There is nothing to weigh against it: the language being listened for is a default
+     * nobody has confirmed, and speech that will not transcribe in it is the only evidence there is.
+     */
+    private const val SWITCH_AFTER_UNPROVEN = 1
 }

@@ -20,7 +20,7 @@ class ListenLanguageFailureTest {
     @Test
     fun `one failure is not evidence`() {
         // A cough, a passing truck, a half-swallowed word. The ear must not move on any of them.
-        val decision = ListenLanguage.afterFailure(Language.ENGLISH, failures = 1)
+        val decision = ListenLanguage.afterFailure(Language.ENGLISH, failures = 1, proven = true)
 
         assertEquals(Language.ENGLISH, decision.language)
         assertEquals(1, decision.streak, "the evidence is kept, not acted on")
@@ -29,7 +29,7 @@ class ListenLanguageFailureTest {
     @Test
     fun `two in a row moves the ear`() {
         // The alternative explanations do not repeat; a customer speaking the other language does.
-        val decision = ListenLanguage.afterFailure(Language.ENGLISH, failures = 2)
+        val decision = ListenLanguage.afterFailure(Language.ENGLISH, failures = 2, proven = true)
 
         assertEquals(Language.INDONESIAN, decision.language)
     }
@@ -38,14 +38,37 @@ class ListenLanguageFailureTest {
     fun `the streak is spent when it is acted on`() {
         // Otherwise the very next failure flips it straight back, and the ear oscillates once per
         // utterance over a room that is simply noisy.
-        assertEquals(0, ListenLanguage.afterFailure(Language.ENGLISH, failures = 2).streak)
+        assertEquals(0, ListenLanguage.afterFailure(Language.ENGLISH, failures = 2, proven = true).streak)
     }
 
     @Test
     fun `it moves in both directions`() {
         assertEquals(
             Language.ENGLISH,
-            ListenLanguage.afterFailure(Language.INDONESIAN, failures = 2).language,
+            ListenLanguage.afterFailure(Language.INDONESIAN, failures = 2, proven = true).language,
+        )
+    }
+
+    @Test
+    fun `an ear that has never worked moves on the very first failure`() {
+        // The reported failure, and the most common way this app is first used: the switch sits
+        // where it was left, the customer speaks whichever language they think in, and the opening
+        // question is the one that fails. Making them repeat themselves twice before being heard is
+        // the first impression.
+        val decision = ListenLanguage.afterFailure(Language.ENGLISH, failures = 1, proven = false)
+
+        assertEquals(Language.INDONESIAN, decision.language)
+        assertEquals(0, decision.streak)
+    }
+
+    @Test
+    fun `a proven ear is not moved by a single failure`() {
+        // The other half of the same rule. Once the ear has been shown to work, one failure is far
+        // more likely to be a cough or a passing truck, and flipping on it would make a working
+        // conversation unusable in a noisy room.
+        assertEquals(
+            Language.ENGLISH,
+            ListenLanguage.afterFailure(Language.ENGLISH, failures = 1, proven = true).language,
         )
     }
 
@@ -54,7 +77,7 @@ class ListenLanguageFailureTest {
         // Two questions in the other language move the ear, and so do two failures. A reader
         // changing one and not the other is the bug this pins.
         val byTranscript = ListenLanguage.next(Language.ENGLISH, Language.INDONESIAN, streak = 1)
-        val byFailure = ListenLanguage.afterFailure(Language.ENGLISH, failures = 2)
+        val byFailure = ListenLanguage.afterFailure(Language.ENGLISH, failures = 2, proven = true)
 
         assertEquals(byTranscript.language, byFailure.language)
     }
