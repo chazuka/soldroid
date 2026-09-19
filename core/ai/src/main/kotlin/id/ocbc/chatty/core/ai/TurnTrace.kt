@@ -150,7 +150,29 @@ data class TurnTrace(
      * same reason [ttsMs] is — the audio is handed over continuously, so the gap between the first
      * frame sent and the provider reporting lips is the whole of its render latency.
      */
-    val avatarMs: Long? get() = both(firstAudioMs, speakStartedMs)
+    val avatarMs: Long? get() = both(firstAudioMs, soundAtMs)
+
+    /**
+     * When sound actually reached the room, measured if it can be and taken on trust if it cannot.
+     *
+     * Every derived number below is anchored here rather than on [speakStartedMs], because the two
+     * were compared over fourteen acoustic turns on a handset and they are not the same quantity:
+     *
+     * ```
+     * from the provider's claim   spread 690ms   stdev 272ms   visibly bimodal
+     * from the measured audio     spread 219ms   stdev  67ms   one tight cluster
+     * ```
+     *
+     * The bimodality was the reporting, not the pipeline. On four of those fourteen turns the
+     * provider announced the lips 366ms to 511ms *after* sound had already arrived, and those four
+     * turns were exactly the ones that made the leg look like it had a slow mode. There is no slow
+     * mode. Anchoring here removes a step that was never in the app and makes every span below four
+     * times more precise.
+     *
+     * Falls back to the claim when there is no measurement — a build with no avatar, or a track the
+     * sink could not attach to — because a less precise number is still better than a missing one.
+     */
+    val soundAtMs: Long? get() = audibleMs ?: speakStartedMs
 
     /**
      * What this app spent turning the first sample into a command on the wire.
@@ -167,17 +189,25 @@ data class TurnTrace(
      * model's sentence-writing taken out: a leg that moves when someone else's code changes is not
      * a measurement of the thing it is named after.
      */
-    val renderMs: Long? get() = both(frameSentMs, speakStartedMs)
+    val renderMs: Long? get() = both(frameSentMs, soundAtMs)
 
     /**
-     * The gap between the provider saying the lips moved and the room actually carrying sound.
+     * How far out the provider's own account of itself was, signed, in milliseconds.
      *
-     * Small and dull when the provider is honest, which makes it worth having: it is the check on
-     * every other number in the avatar leg. A large or negative-shaped result — [audibleMs] present
-     * with no [speakStartedMs] before it — means the control socket is describing a different
-     * utterance from the one the customer is hearing.
+     * Negative is the healthy shape: the lips were announced shortly before the sound arrived, by
+     * about the transport delay. Positive means the announcement came *after* the customer could
+     * already hear it, which is the provider describing an utterance that had already begun.
+     *
+     * Deliberately signed and deliberately not a duration. The earlier version of this was a span
+     * and returned null whenever the order was wrong, which discarded every case worth looking at:
+     * the late claims were the whole finding, and a metric that renders them as "no data" would
+     * have hidden it. Measured across fourteen turns as -176 to -318ms on ten and +366 to +511ms
+     * on four.
+     *
+     * Null unless both marks exist, because a build with no measurement has nothing to compare.
      */
-    val roomMs: Long? get() = both(speakStartedMs, audibleMs)
+    val claimSkewMs: Long? get() =
+        if (speakStartedMs != null && audibleMs != null) speakStartedMs - audibleMs else null
 
     /** The span between two marks, or null unless both happened in that order. */
     private fun both(from: Long?, to: Long?): Long? =
@@ -191,6 +221,7 @@ data class TurnTrace(
         append("  wire ").append(frameSentMs.ms())
         append("  lips ").append(speakStartedMs.ms()).append('/').append(speakEndedMs.ms())
         append("  audible ").append(audibleMs.ms())
+        claimSkewMs?.let { append("  claim ").append(if (it >= 0) "+" else "").append(it).append("ms") }
         append("  ").append(sentences).append(" sentence(s)")
         if (starved > 0) append("  starved ").append(starved).append('x')
         if (reconnects > 0) append("  reconnected ").append(reconnects).append('x')

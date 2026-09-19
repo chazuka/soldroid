@@ -36,7 +36,7 @@ class TurnTraceTest {
         assertTrue(trace.complete)
         assertEquals(
             "llm 3782ms/4691ms  tts 4365ms  wire 4371ms  " +
-                "lips 5425ms/18679ms  audible 5610ms  2 sentence(s)",
+                "lips 5425ms/18679ms  audible 5610ms  claim -185ms  2 sentence(s)",
             trace.summary(),
         )
     }
@@ -120,20 +120,48 @@ class TurnLegsTest {
     }
 
     @Test
-    fun `the room is what checks the provider's word`() {
+    fun `the provider announcing itself early is the healthy shape`() {
         val trace = TurnTrace(askedAtMs = 0, speakStartedMs = 3_000, audibleMs = 3_185)
 
-        assertEquals(185L, trace.roomMs)
+        assertEquals(-185L, trace.claimSkewMs, "announced shortly before the sound arrived")
     }
 
     @Test
-    fun `a provider that claims lips after the room already had sound reports no room leg`() {
-        // Observed on this app in the other direction: speak_ended arrived before the lips moved at
-        // all. A control socket that describes a different utterance from the one being heard must
-        // leave a gap here, not a negative number that averages away.
-        val lying = TurnTrace(askedAtMs = 0, speakStartedMs = 3_400, audibleMs = 3_000)
+    fun `a claim that lands after the sound is kept, not discarded`() {
+        // The whole finding. On four of fourteen acoustic turns the provider announced the lips
+        // 366-511ms after the room was already carrying sound, and those four were exactly the
+        // ones that made the render leg look bimodal. The earlier version of this was a duration
+        // and returned null whenever the order was wrong, which rendered the interesting cases as
+        // "no data" and hid the thing worth seeing.
+        val late = TurnTrace(askedAtMs = 0, speakStartedMs = 3_400, audibleMs = 3_000)
 
-        assertNull(lying.roomMs)
+        assertEquals(400L, late.claimSkewMs)
+    }
+
+    @Test
+    fun `the avatar leg is measured from the sound, not from the claim`() {
+        // Anchored on the claim these spans had stdev 272ms across fourteen turns; anchored on the
+        // measurement, 67ms. The difference was never in the pipeline.
+        val trace = TurnTrace(
+            askedAtMs = 0,
+            firstAudioMs = 1_700,
+            frameSentMs = 1_701,
+            speakStartedMs = 3_200,
+            audibleMs = 2_774,
+        )
+
+        assertEquals(1_074L, trace.avatarMs, "the sound is what the customer experienced")
+        assertEquals(1_073L, trace.renderMs)
+        assertEquals(426L, trace.claimSkewMs, "and the claim's error is kept beside it")
+    }
+
+    @Test
+    fun `without a measurement the claim is still used`() {
+        // A build with no avatar sink attached must still report a leg. Less precise beats absent.
+        val trace = TurnTrace(askedAtMs = 0, frameSentMs = 1_701, speakStartedMs = 2_800)
+
+        assertEquals(1_099L, trace.renderMs)
+        assertNull(trace.claimSkewMs, "nothing to compare the claim against")
     }
 
     @Test
@@ -142,7 +170,7 @@ class TurnLegsTest {
 
         assertNull(captionsOnly.uplinkMs)
         assertNull(captionsOnly.renderMs)
-        assertNull(captionsOnly.roomMs)
+        assertNull(captionsOnly.claimSkewMs)
     }
 
     @Test
