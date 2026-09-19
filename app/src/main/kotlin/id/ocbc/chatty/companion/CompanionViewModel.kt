@@ -603,6 +603,18 @@ class CompanionViewModel @Inject constructor(
         // Sending the last frame is not the end of speaking: the provider still has the audio to
         // render, and only it can say when the lips stopped.
         utterance?.awaitEnd()
+        // And the provider is not the last word either.
+        //
+        // `agent.speak_ended` has been observed arriving while the avatar is plainly still talking
+        // — 178ms after the lips started, for a three-sentence answer. Taken at face value the turn
+        // ends there, the microphone opens on the next breath, and it hears the rest of the answer
+        // and asks the agent about it. That is the conversation-with-itself, and no amount of
+        // filtering the words afterwards fixes a microphone opened too early.
+        //
+        // The audio's own length is not a guess: it is the bytes this app sent, at a rate it
+        // chose. So the event is treated as a lower bound and the audio as the other one, and the
+        // turn ends at whichever is later.
+        utterance?.let { waitOutRemainingAudio(it) }
         // Closed, not cancelled. The reveal is deliberately slower than the transfer, so it is still
         // a clause or so behind when the provider reports the lips have stopped — cancelling here
         // froze the caption mid-answer and left the rest of it never shown. Closing ends the loop
@@ -660,6 +672,28 @@ class CompanionViewModel @Inject constructor(
                 outcome = outcome,
             ),
         )
+    }
+
+    /**
+     * Waits until the audio that was sent could actually have finished playing.
+     *
+     * Silent when the provider's report was honest, which is most of the time — the remaining
+     * duration comes out at or below zero and this returns immediately. It only costs anything on
+     * the turns where `speak_ended` was early, which are exactly the turns that were breaking
+     * handsfree.
+     *
+     * Interruptions are exempt: barge-in clears what the provider had buffered, so the audio that
+     * was sent is not going to be played and waiting for it would leave the customer looking at a
+     * face that stopped talking a while ago.
+     */
+    private suspend fun waitOutRemainingAudio(utterance: Utterance) {
+        if (interrupted) return
+        val trace = _state.value.trace ?: return
+        val startedAt = trace.speakStartedMs?.let { trace.askedAtMs + it } ?: return
+        val remaining = startedAt + utterance.expectedDurationMs - System.currentTimeMillis()
+        if (remaining <= 0) return
+        Log.i(TAG, "audio has ${remaining}ms left to play; holding the turn open")
+        delay(remaining)
     }
 
     /**
