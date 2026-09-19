@@ -92,18 +92,16 @@ class HandsfreeTest {
     @Test
     fun `the microphone is shut for the whole of a turn`() {
         // The agent speaks through the same handset the microphone is in.
-        assertEquals(
-            Handsfree.Intent.Close,
-            Handsfree.intent(on = true, onStage = true, accepting = false, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0),
-        )
+        val intent = Handsfree.intent(on = true, onStage = true, accepting = false, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0)
+
+        assertEquals(Handsfree.Intent.Close("a turn is in flight"), intent)
     }
 
     @Test
     fun `the thread gets no microphone`() {
-        assertEquals(
-            Handsfree.Intent.Close,
-            Handsfree.intent(on = true, onStage = false, accepting = true, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0),
-        )
+        val intent = Handsfree.intent(on = true, onStage = false, accepting = true, avatarSpeaking = false, reconnecting = false, quietMs = 0, retryDelayMs = 0)
+
+        assertEquals(Handsfree.Intent.Close("not on the stage"), intent)
     }
 
     @Test
@@ -178,9 +176,7 @@ class HandsfreeTest {
         // The turn can be over and the answer still coming out of the speaker: the provider reports
         // the end of an utterance, and the audio is still in a jitter buffer on its way out. Opened
         // then, the microphone hears the rest of the answer and the agent interviews itself.
-        assertEquals(
-            Handsfree.Intent.Close,
-            Handsfree.intent(
+        val intent = Handsfree.intent(
                 on = true,
                 onStage = true,
                 accepting = true,
@@ -188,8 +184,9 @@ class HandsfreeTest {
                 reconnecting = false,
                 quietMs = 0,
                 retryDelayMs = 0,
-            ),
-        )
+            )
+
+        assertEquals(Handsfree.Intent.Close("the avatar is still audible"), intent)
     }
 
     @Test
@@ -212,9 +209,7 @@ class HandsfreeTest {
     fun `the microphone stays shut while the room is reconnecting`() {
         // Nothing said into a room that has dropped reaches anyone, and the face on screen is a
         // still frame. Listening would only collect a question for an avatar that cannot answer it.
-        assertEquals(
-            Handsfree.Intent.Close,
-            Handsfree.intent(
+        val intent = Handsfree.intent(
                 on = true,
                 onStage = true,
                 accepting = true,
@@ -222,7 +217,8 @@ class HandsfreeTest {
                 reconnecting = true,
                 quietMs = 0,
                 retryDelayMs = 0,
-            ),
-        )
+            )
+
+        assertEquals(Handsfree.Intent.Close("the room is reconnecting"), intent)
     }
 }

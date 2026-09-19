@@ -77,6 +77,15 @@ data class TurnTrace(
      * off" and a number that moves when the pipeline changes.
      */
     val starved: Int = 0,
+
+    /**
+     * How many times the room dropped and came back while this turn was running.
+     *
+     * The other numbers here say how long something took; this says whether the connection was
+     * there for it. A turn that reconnected mid-answer is not a slow turn, it is an interrupted
+     * one, and averaging the two together hides both.
+     */
+    val reconnects: Int = 0,
 ) {
     /** True once the avatar has finished; a trace stops changing here. */
     val complete: Boolean get() = speakEndedMs != null
@@ -127,6 +136,7 @@ data class TurnTrace(
         append("  lips ").append(speakStartedMs.ms()).append('/').append(speakEndedMs.ms())
         append("  ").append(sentences).append(" sentence(s)")
         if (starved > 0) append("  starved ").append(starved).append('x')
+        if (reconnects > 0) append("  reconnected ").append(reconnects).append('x')
     }
 
     private fun Long?.ms(): String = this?.let { "${it}ms" } ?: "—"

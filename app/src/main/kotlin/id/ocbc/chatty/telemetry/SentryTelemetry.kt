@@ -227,6 +227,7 @@ class SentryTurnSink : TurnSink {
         open.setMeasurement("answer_chars", turn.answerChars)
         open.setMeasurement("sentences", trace.sentences)
         open.setMeasurement("starved", trace.starved)
+        open.setMeasurement("reconnects", trace.reconnects)
 
         // The legs, as spans, so the transaction reads as a waterfall rather than a bag of numbers.
         open.leg(OP_LLM, from = 0, to = trace.firstTokenMs)

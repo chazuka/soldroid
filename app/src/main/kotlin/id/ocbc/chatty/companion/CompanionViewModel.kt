@@ -310,7 +310,12 @@ class CompanionViewModel @Inject constructor(
             controller.speaking.collect { speaking -> _state.update { it.copy(avatarSpeaking = speaking) } }
         }
         viewModelScope.launch {
-            controller.reconnecting.collect { down -> _state.update { it.copy(reconnecting = down) } }
+            controller.reconnecting.collect { down ->
+                // Counted against the turn in flight, so a slow answer can be told apart from an
+                // interrupted one after the fact.
+                if (down && turnInFlight) mark { copy(reconnects = reconnects + 1) }
+                _state.update { it.copy(reconnecting = down) }
+            }
         }
         viewModelScope.launch {
             controller.connection.collect { quality -> _state.update { it.copy(connection = quality) } }
