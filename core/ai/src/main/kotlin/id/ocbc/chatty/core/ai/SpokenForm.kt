@@ -32,8 +32,35 @@ fun spokenForm(text: String, language: Language): String {
     // the exact opposite of English: run it over an English sentence and "Rp1,200,000" is spoken as
     // "satu koma dua rupiah" — a balance misstated by a factor of a thousand, out loud, to the
     // person who owns it. The English speller makes the same bargain in reverse.
-    return if (language == Language.INDONESIAN) spokenIndonesian(text) else spokenEnglish(text)
+    val spelled = if (language == Language.INDONESIAN) spokenIndonesian(text) else spokenEnglish(text)
+    return spelled.sayRates()
 }
+
+/**
+ * Reads a rate's slash out loud: `Rp5.000.000/bulan` becomes "…rupiah per bulan".
+ *
+ * # Why this is the app's job now
+ *
+ * It used not to be. The synthesizer's own text normalization expanded "/" into the right word, and
+ * that normalization is switched off here because it costs latency on every clause and this file
+ * already does the part that matters — the figures. Turning it off took the slash with it, and a
+ * slash the voice cannot say is a slash it drops: "five million rupiah bulan", which is not an
+ * amount anybody states.
+ *
+ * "per" is the same word in both languages, which is why one rule serves both. It is also right for
+ * a fraction read aloud in Indonesian — `3/12` is "tiga per dua belas" — and only loosely right in
+ * English, where "three per twelve" is understandable but not how anyone says it. These answers are
+ * about money per period, where it is exactly right, so that is the case it serves.
+ */
+private fun String.sayRates(): String = replace(RATE_SLASH, " per ")
+
+/**
+ * A slash with no space around it, which is how a rate is written and how a date is not.
+ *
+ * Bounded on both sides so that a slash already spoken as a separator — someone writing "A / B" —
+ * is left alone, and so the replacement cannot double a space that was already there.
+ */
+private val RATE_SLASH = Regex("""(?<=\S)/(?=\S)""")
 
 /**
  * Spells the numbers in an English line into English words.
