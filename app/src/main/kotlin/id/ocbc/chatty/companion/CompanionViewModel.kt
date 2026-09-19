@@ -469,7 +469,7 @@ class CompanionViewModel @Inject constructor(
         val fragments = Channel<String>(Channel.UNLIMITED)
         val chat = brains[current.brain]
         val job = viewModelScope.launch {
-            runCatching { chat.reply(agent.id, history.asChatHistory()).collect(fragments::send) }
+            runCatching { chat.reply(agent.id, history.asChatHistory(), current.language).collect(fragments::send) }
                 .fold(
                     onSuccess = { fragments.close() },
                     // Closed with the failure rather than swallowed: if this speculation is adopted
@@ -529,7 +529,7 @@ class CompanionViewModel @Inject constructor(
         // before the question finished and then follows the rest live, so everything downstream is
         // unchanged. Nothing else knows the difference.
         val chat = brains[_state.value.brain]
-        val fragments = (adopted?.fragments?.receiveAsFlow() ?: chat.reply(agent.id, history.asChatHistory()))
+        val fragments = (adopted?.fragments?.receiveAsFlow() ?: chat.reply(agent.id, history.asChatHistory(), _state.value.language))
             .onEach { fragment ->
                 answer.append(fragment)
                 mark { copy(firstTokenMs = firstTokenMs ?: elapsed()) }

@@ -70,7 +70,7 @@ class BrainsTest {
 
     private object Stub : ChatClient {
         override suspend fun agents(): List<AgentSummary> = emptyList()
-        override fun reply(agentId: String, history: List<ChatMessage>): Flow<String> =
+        override fun reply(agentId: String, history: List<ChatMessage>, speaking: Language): Flow<String> =
             throw UnsupportedOperationException("not asked in these tests")
     }
 }

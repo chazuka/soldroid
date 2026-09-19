@@ -96,8 +96,13 @@ class OpenAiChatClient(
     records: CustomerRecords,
 ) : BriefedChatClient(roster, records) {
 
-    override fun reply(agentId: String, history: List<ChatMessage>): Flow<String> = flow {
-        val messages = listOf(OpenAiMessageDto("system", brief(agentId))) +
+    override fun reply(agentId: String, history: List<ChatMessage>, speaking: Language): Flow<String> = flow {
+        val messages = listOf(
+            OpenAiMessageDto("system", brief(agentId)),
+            // Its own message, after the brief. The brief is identical every turn and is what the
+            // provider is asked to cache; a per-turn string folded into it would spoil that.
+            OpenAiMessageDto("system", languageDirective(speaking)),
+        ) +
             history.map { OpenAiMessageDto(it.role.wire, it.content) }
 
         val request = Request.Builder()
@@ -147,7 +152,7 @@ class AnthropicChatClient(
     records: CustomerRecords,
 ) : BriefedChatClient(roster, records) {
 
-    override fun reply(agentId: String, history: List<ChatMessage>): Flow<String> = flow {
+    override fun reply(agentId: String, history: List<ChatMessage>, speaking: Language): Flow<String> = flow {
         val payload = AnthropicRequestDto(
             model = model,
             maxTokens = MAX_TOKENS,
@@ -159,6 +164,10 @@ class AnthropicChatClient(
                     text = brief(agentId),
                     cacheControl = CacheControlDto(CACHE_EPHEMERAL),
                 ),
+                // Deliberately after the breakpoint, and deliberately uncached. Everything up to a
+                // `cache_control` block is what gets reused, so a string that changes per turn has
+                // to sit past it or every question pays full price for the brief again.
+                AnthropicSystemBlockDto(type = BLOCK_TEXT, text = languageDirective(speaking)),
             ),
             messages = history.map { AnthropicMessageDto(it.role.wire, it.content) },
             thinking = AnthropicThinkingDto(THINKING_DISABLED),

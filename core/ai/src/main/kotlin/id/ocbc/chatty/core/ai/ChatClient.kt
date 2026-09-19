@@ -40,8 +40,12 @@ interface ChatClient {
      * reply. Streaming is what lets the first sentence reach the synthesizer while the model is
      * still writing the second, which is most of the difference between a companion that answers
      * and one that pauses.
+     *
+     * [speaking] is the language the app is set to. It is a per-turn parameter rather than part of
+     * the persona brief because it changes per turn and the brief is cached; see [languageDirective]
+     * for what each client does with it and why the standing prompt could not carry the rule.
      */
-    fun reply(agentId: String, history: List<ChatMessage>): Flow<String>
+    fun reply(agentId: String, history: List<ChatMessage>, speaking: Language): Flow<String>
 
     /**
      * Fetches whatever this client needs before it can answer for [agentId], so the first turn does
@@ -109,10 +113,13 @@ class HttpChatClient(
      * chunk with no content — is skipped rather than failed on, because none of it changes the
      * answer and a strict reader would drop a live turn over a heartbeat.
      */
-    override fun reply(agentId: String, history: List<ChatMessage>): Flow<String> = flow {
+    override fun reply(agentId: String, history: List<ChatMessage>, speaking: Language): Flow<String> = flow {
         val payload = ChatRequestDto(
             model = agentId,
-            messages = history.map { MessageDto(it.role.wire, it.content) },
+            // This persona already knows who it is, so the only thing prepended is the one rule
+            // that cannot live server-side: which language to answer this question in.
+            messages = listOf(MessageDto(ChatMessage.Role.SYSTEM.wire, languageDirective(speaking))) +
+                history.map { MessageDto(it.role.wire, it.content) },
             stream = true,
         )
         val request = Request.Builder()
