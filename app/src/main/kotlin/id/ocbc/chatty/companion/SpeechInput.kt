@@ -94,6 +94,29 @@ interface SpeechInput {
      */
     fun start(endpointed: Boolean = false)
 
+    /**
+     * How long a caller must wait before [start] will be honoured. Zero when it will be honoured now.
+     *
+     * # Why the caller has to ask rather than just call
+     *
+     * Android reports a terminal callback before the recognition service has finished letting go,
+     * and a start inside that window returns `ERROR_CLIENT`. The obvious guard is to refuse the
+     * start, and that shipped, and it froze handsfree: [start] returned having done nothing,
+     * `listening` stayed false, no callback ever came, and the effect that had called it completed
+     * with no state left to change. Handsfree sat on screen saying "on" over a microphone that
+     * would never open again. The refusal was invisible to the one caller that needed to know.
+     *
+     * So the floor is a delay the caller adds, never a refusal it cannot see. By the time it has
+     * waited this long the gap has elapsed and the start is accepted, which makes the slow path a
+     * slightly later listen instead of a dead conversation.
+     *
+     * ```
+     * delay(intent.delayMs + speech.restartDelayMs)
+     * speech.start(endpointed = true)
+     * ```
+     */
+    val restartDelayMs: Long
+
     /** Ends the utterance and asks for the transcription of what has been heard so far. */
     fun stop()
 
@@ -245,6 +268,10 @@ private class RecognizerSpeechInput(
     private val onProblem: (SpeechProblem) -> Unit,
 ) : SpeechInput {
 
+    override val restartDelayMs: Long
+        get() = (MIN_RESTART_GAP_MS - (System.currentTimeMillis() - lastStartedAt.longValue))
+            .coerceAtLeast(0L)
+
     override fun start(endpointed: Boolean) {
         if (recognizer == null) {
             onProblem(SpeechProblem.UNAVAILABLE)
@@ -258,21 +285,12 @@ private class RecognizerSpeechInput(
         // some implementations and is ignored on others. Neither is what the caller meant.
         if (listening.value) return
 
-        // A second start too soon after the last one is refused.
-        //
-        // Android reports a terminal callback before the recognition service has finished letting
-        // go, and starting inside that window returns ERROR_CLIENT — which costs a recovery
-        // backoff, so one wasted start becomes seconds of a microphone that looks open and hears
-        // nothing. It showed up as two "microphone open" lines 83ms and 100ms apart, which is not
-        // a rate anything here asks for on purpose.
-        //
-        // The platform offers no signal for "the service has released", so a floor on the restart
-        // rate is what is left. A rate limit, not a guess about state: below this gap a start is
-        // known to fail, above it the service has had time.
+        // Callers are expected to have waited out [restartDelayMs] already. One that has not is a
+        // bug in the caller, and it is logged rather than refused: refusing is what froze handsfree
+        // the first time, because a start that quietly does nothing leaves nobody to try again.
         val since = System.currentTimeMillis() - lastStartedAt.longValue
         if (since < MIN_RESTART_GAP_MS) {
-            Log.i(SPEECH_TAG, "declining a restart ${since}ms after the last")
-            return
+            Log.w(SPEECH_TAG, "starting ${since}ms after the last; ERROR_CLIENT is likely")
         }
         lastStartedAt.longValue = System.currentTimeMillis()
         listening.value = true

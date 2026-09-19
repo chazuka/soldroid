@@ -20,12 +20,21 @@ import org.junit.Test
  */
 class RoomLoudnessTest {
 
-    /** One WebRTC delivery: 10ms of mono 48 kHz PCM, every sample at [amplitude]. */
-    private fun buffer(amplitude: Int, frames: Int = 480): ByteBuffer =
-        ByteBuffer.allocate(frames * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
-            repeat(frames) { putShort(amplitude.toShort()) }
-            rewind()
-        }
+    /**
+     * One WebRTC delivery: 10ms of mono 48 kHz PCM, every sample at [amplitude].
+     *
+     * The bytes are little-endian, because WebRTC's PCM is, but the buffer is deliberately left
+     * flagged big-endian, because that is how a direct buffer arrives when nobody sets the flag.
+     * The first version of this helper set the flag to match the bytes, which quietly handed the
+     * code under test the one thing it was getting wrong: it read `order()` and was byte-swapping
+     * every sample on a real handset while every test here passed.
+     */
+    private fun buffer(amplitude: Int, frames: Int = 480): ByteBuffer {
+        val bytes = ByteBuffer.allocate(frames * 2).order(ByteOrder.LITTLE_ENDIAN)
+        repeat(frames) { bytes.putShort(amplitude.toShort()) }
+        bytes.rewind()
+        return bytes.order(ByteOrder.BIG_ENDIAN)
+    }
 
     private fun RoomLoudness.feed10ms(amplitude: Int) =
         feed(buffer(amplitude), bitsPerSample = 16, sampleRate = 48_000, channels = 1, frames = 480)
@@ -110,6 +119,19 @@ class RoomLoudnessTest {
     }
 
     @Test
+    fun `the handset's own byte order is what shipped broken`() {
+        // A true sample of 2 is digital silence. Read byte-swapped it is 0x0200, or 512, which sat
+        // above the threshold on every window: the room read as permanently loud and handsfree
+        // never opened the microphone again. Measured on a handset as exactly 512, a hundred
+        // windows in a row, which is what a constant rather than noise looks like.
+        val loudness = RoomLoudness()
+
+        repeat(100) { loudness.feed10ms(2) }
+
+        assertFalse(loudness.speaking, "a swapped 2 reads as 512 and holds the microphone shut")
+    }
+
+    @Test
     fun `a new track starts from silence`() {
         // A reconnect resubscribes, and whatever the last track was doing when it went away must
         // not be inherited: the flag would hold the microphone shut over a room carrying nothing.
@@ -133,7 +155,7 @@ class RoomLoudnessTest {
             repeat(480) { putShort(0) }
             putShort(16 * 2, 9_000)
             rewind()
-        }
+        }.order(ByteOrder.BIG_ENDIAN)
 
         assertTrue(
             loudness.feed(quietWithOneSpike, 16, 48_000, 1, 480),

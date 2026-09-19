@@ -45,6 +45,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -457,9 +458,53 @@ private fun CompanionScreen(
                 onHandsfreeTimedOut()
             }
             is Handsfree.Intent.Listen -> {
-                delay(intent.delayMs)
+                // The recogniser's own cooling-off period is added here rather than enforced inside
+                // start(). A start that refuses silently is a dead end: nothing changes, so this
+                // effect is never re-run, and handsfree sits on screen saying "on" over a
+                // microphone that will never open again. Waiting costs a later listen; refusing
+                // cost the whole conversation.
+                delay(intent.delayMs + speech.restartDelayMs)
                 Log.i(HANDSFREE_TAG, "handsfree listening")
                 speech.start(endpointed = true)
+            }
+        }
+    }
+
+    // The one invariant handsfree has, checked on a clock rather than trusted.
+    //
+    // Everything above is edge-driven: an effect re-runs when a key changes, opens the microphone,
+    // and finishes. That is correct right up until some path leaves no key to change, and then
+    // handsfree sits on screen saying "on" over a microphone that will never open again. It has
+    // happened four times, each from a different cause — a listener wiped by recomposition, an
+    // early return that produced no turn, a language key missing from an effect, a start that
+    // refused silently — and each was found by a customer rather than by the app.
+    //
+    // So the state is also checked level-triggered: if handsfree wants the microphone open and it
+    // is shut, that is a fault whatever caused it, and bumping [rearm] re-runs the effect that
+    // opens it. The period is comfortably longer than the longest legitimate wait before a listen
+    // (re-arm plus a fault backoff plus the recogniser's cooling-off), so a listen that is merely
+    // on its way is never mistaken for a stall.
+    val stateHandsfree by rememberUpdatedState(state.handsfree)
+    val micWanted by rememberUpdatedState(wantsMic)
+    val micOpen by rememberUpdatedState(listening)
+    val micGates by rememberUpdatedState(
+        "on=${state.handsfree} stage=$onStage accepting=${state.acceptingInput} " +
+            "speaking=${state.avatarSpeaking} reconnecting=${state.reconnecting} " +
+            "opening=${state.avatarOpening}",
+    )
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(HANDSFREE_WATCHDOG_MS)
+            if (micOpen) continue
+            if (micWanted) {
+                Log.w(HANDSFREE_TAG, "handsfree wanted the microphone and it was shut; re-arming")
+                rearm += 1
+            } else if (stateHandsfree) {
+                // Handsfree is on and the microphone is shut on purpose. Which gate is holding it
+                // is the first question every time this is reported, and until now the log could
+                // not answer it: the branch that names a reason only runs when the gates *change*,
+                // and a conversation stuck this way is one where nothing changes at all.
+                Log.i(HANDSFREE_TAG, "microphone shut while handsfree is on: $micGates")
             }
         }
     }
@@ -912,6 +957,16 @@ private val COMPOSER_CONTROL_SIZE = 44.dp
  * Tuned against how the partial transcript actually arrives rather than against how long a person
  * pauses: engines report in bursts, and a window under about a second cuts people off mid-thought.
  */
+/**
+ * How often handsfree checks that the microphone is actually open when it should be.
+ *
+ * Longer than the longest legitimate wait before a listen begins — [Handsfree.REARM_MS] plus
+ * [Handsfree.FAULT_BACKOFF_MS] plus the recogniser's own cooling-off, about 2.3 seconds — so a
+ * listen that is merely on its way is never mistaken for a stall and restarted out from under
+ * itself.
+ */
+private const val HANDSFREE_WATCHDOG_MS = 5_000L
+
 private const val HANDSFREE_SETTLE_MS = 1_200L
 
 /**

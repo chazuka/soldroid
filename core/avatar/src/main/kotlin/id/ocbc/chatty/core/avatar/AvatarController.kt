@@ -231,9 +231,19 @@ class LiveKitAvatarController(
      */
     private val loudnessSink = AudioTrackSink { audio, bits, rate, channels, frames, _ ->
         if (loudness.feed(audio, bits, rate, channels, frames)) {
-            _speaking.value = loudness.speaking
+            val speaking = loudness.speaking
+            _speaking.value = speaking
+            // One line per utterance, at the end of it, carrying the loudest thing that utterance
+            // reached. It is the only way to notice the threshold drifting out from under this:
+            // when the byte order was wrong the room read as a constant 512 and the microphone
+            // never opened again, and nothing in the app could say why.
+            if (!speaking) lastUtterancePeak = loudness.takeReading().peak
         }
     }
+
+    /** Set on the audio thread when an utterance ends, read by [speaking]'s observers. */
+    @Volatile
+    private var lastUtterancePeak: Int = 0
 
     // The avatar's remote audio, held only to gate local playout. The room subscribes regardless;
     // muting flips the underlying rtc track's enabled flag, which stops playout without touching
@@ -282,6 +292,7 @@ class LiveKitAvatarController(
 
     private var eventsJob: Job? = null
     private var connectJob: Job? = null
+    private var loudnessLog: Job? = null
 
     init {
         subscribeRoomEvents()
@@ -525,9 +536,20 @@ class LiveKitAvatarController(
         loudness.reset()
         _speaking.value = false
         track.addSink(loudnessSink)
+        loudnessLog?.cancel()
+        loudnessLog = scope.launch {
+            // Reports what the sink measured, off the audio thread, because a log line is a socket
+            // write and that thread is feeding the speaker.
+            _speaking.collect { speaking ->
+                if (!speaking && lastUtterancePeak > 0) {
+                    Log.i(TAG, "utterance ended, loudest sample $lastUtterancePeak")
+                }
+            }
+        }
     }
 
     private fun stopListeningForSound() {
+        loudnessLog?.cancel(); loudnessLog = null
         (audioTrack as? RemoteAudioTrack)?.removeSink(loudnessSink)
         audioTrack = null
         loudness.reset()
