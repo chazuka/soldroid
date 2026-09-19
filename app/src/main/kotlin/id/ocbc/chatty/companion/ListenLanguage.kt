@@ -54,6 +54,31 @@ internal object ListenLanguage {
         else -> Decision(current, streak + 1)
     }
 
+    /**
+     * The language to listen for after the recogniser heard speech and could make nothing of it.
+     *
+     * # Why a failure is evidence
+     *
+     * [next] learns from the *transcript*, so it learns nothing from a question that never became
+     * one, and that is precisely the case where the ear is most likely to be wrong. Measured on a
+     * handset with the switch on EN and an Indonesian question spoken into it: six consecutive
+     * failures over eighty seconds, every one of them reporting that speech had been detected,
+     * every retry using the same losing configuration, and the customer getting silence.
+     *
+     * Android's own bilingual hint is asked for and is not enough — it is a hint, and on this
+     * handset it did not save the case it exists for. So an unusable recognition counts against the
+     * current language, and enough of them in a row move the ear. Speech that will not transcribe
+     * in the language being listened for is the strongest available signal that it is in the other
+     * one, because the alternative explanations — a cough, a passing truck — do not repeat.
+     *
+     * ```
+     * val decision = ListenLanguage.afterFailure(current = Language.ENGLISH, failures = 2)
+     * // Decision(language = INDONESIAN, streak = 0)
+     * ```
+     */
+    fun afterFailure(current: Language, failures: Int): Decision =
+        if (failures >= SWITCH_AFTER) Decision(current.toggled(), 0) else Decision(current, failures)
+
     /** What [next] decided, and the evidence to carry forward. */
     data class Decision(val language: Language, val streak: Int)
 

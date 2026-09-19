@@ -66,6 +66,31 @@ class HandsfreeTest {
     // --- what the failure really was -----------------------------------------------------------
 
     @Test
+    fun `speech that will not transcribe is retried and never mentioned`() {
+        // Same handling as silence from the customer's seat, different meaning to the app: this is
+        // the signal that re-points the ear at the other language. See ListenLanguage.afterFailure.
+        val recovery = Handsfree.recover(SpeechProblem.NOT_UNDERSTOOD, on = true)
+
+        assertNull(recovery.notify, "the customer is not told their accent failed")
+        assertEquals(true, recovery.rearm)
+        assertEquals(0L, recovery.backoffMs, "the next attempt uses a different ear, not a longer wait")
+    }
+
+    @Test
+    fun `offline is offline whichever way the recogniser phrased it`() {
+        // Google reports the same codes offline as it does for a quiet room, and now for unusable
+        // speech too. Both have to become NO_NETWORK, or the app blames the customer's accent for
+        // a dead connection and, worse, starts switching the ear to fix it.
+        for (problem in listOf(SpeechProblem.NO_MATCH, SpeechProblem.NOT_UNDERSTOOD)) {
+            assertEquals(
+                SpeechProblem.NO_NETWORK,
+                Handsfree.classify(problem, hasNetwork = false),
+                "$problem offline is a dead connection, not a language mismatch",
+            )
+        }
+    }
+
+    @Test
     fun `no network is not the customer mumbling`() {
         // Offline, the recogniser reports the same code it uses for a silent room, so the copy
         // blamed their speech for a dead connection.

@@ -109,7 +109,11 @@ object Handsfree {
 
         if (!on || permanent) return Recovery(notify = problem, rearm = false, backoffMs = 0L)
 
-        val silence = problem == SpeechProblem.NO_MATCH
+        // Both are "nothing usable came back", and in handsfree neither is worth a line of copy:
+        // the microphone is open because the app opened it, not because anyone was asked to speak.
+        // They differ in what the app does about it, not in what the customer is told. See
+        // CompanionViewModel.onSpeechProblem.
+        val silence = problem == SpeechProblem.NO_MATCH || problem == SpeechProblem.NOT_UNDERSTOOD
         return Recovery(
             notify = if (silence) null else problem,
             rearm = true,
@@ -124,8 +128,11 @@ object Handsfree {
      * so the copy blamed the customer's speech for a dead connection and invited them to repeat
      * themselves into a microphone that could not work either way.
      */
-    fun classify(problem: SpeechProblem, hasNetwork: Boolean): SpeechProblem =
-        if (problem == SpeechProblem.NO_MATCH && !hasNetwork) SpeechProblem.NO_NETWORK else problem
+    fun classify(problem: SpeechProblem, hasNetwork: Boolean): SpeechProblem = when {
+        !hasNetwork && problem == SpeechProblem.NO_MATCH -> SpeechProblem.NO_NETWORK
+        !hasNetwork && problem == SpeechProblem.NOT_UNDERSTOOD -> SpeechProblem.NO_NETWORK
+        else -> problem
+    }
 
     /** What letting go of the microphone means. */
     enum class Release {
