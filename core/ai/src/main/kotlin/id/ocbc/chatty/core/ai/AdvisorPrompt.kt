@@ -15,7 +15,9 @@ package id.ocbc.chatty.core.ai
  * It is handed over exactly as the API returns it rather than being flattened into prose. Prose has
  * to choose what to include, and every such choice is a way for a balance to go missing or a goal to
  * be quietly dropped; a model reading structured data can see the whole record and say which field
- * it is quoting. At 1.5–3k tokens it also caches, so only the first turn of a conversation pays.
+ * it is quoting. The whole brief measures ~5,420 input tokens, which is why it is sent behind a
+ * cache breakpoint rather than re-read at full price on every turn — the client asks for that
+ * explicitly, it is not something the API does on its own.
  *
  * ```
  * val prompt = advisorPrompt(
