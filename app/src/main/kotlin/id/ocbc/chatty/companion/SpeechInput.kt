@@ -14,8 +14,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -118,8 +120,8 @@ interface SpeechInput {
  *
  * ```
  * val speech = rememberSpeechInput(onResult = viewModel::ask, onProblem = viewModel::onSpeechProblem)
- * // onResult also reports how long the recogniser took to decide, which is the one leg of a turn
- * // that happens before the turn starts. See RecognitionCallbacks.onEndOfSpeech.
+ * // onResult also reports how long the recogniser took to turn the closed utterance into text,
+ * // which is the one leg of a turn that happens before the turn starts. See stop().
  * MicButton(
  *     enabled = speech.available,
  *     onPress = { speech.start() },
@@ -163,23 +165,20 @@ fun rememberSpeechInput(
     // recomposition, and partial results cause recompositions while the customer is still talking,
     // so anything the listener keeps for itself is wiped during the utterance it is describing.
     //
-    // [lastWordsAt] is the fallback for measuring the wait. The obvious signal, onEndOfSpeech,
-    // turned out to fire about ten milliseconds before the transcript arrives on this handset —
-    // it reports that recognition finished, not that the customer stopped — so the last time new
-    // words appeared is the honest stand-in.
+    // [closedAt] is when *this app* ended the utterance, which is the only moment in the sequence
+    // it controls. Two earlier attempts measured inferred moments and both were wrong:
+    // onEndOfSpeech fires about ten milliseconds before the transcript arrives on this handset, and
+    // "when new words last appeared" is clobbered by the corrected partial the recogniser emits as
+    // part of finalising — it read 16ms on a turn that had plainly waited out the whole settle.
+    // What is left is exact: stop() is called, and the transcript arrives some time later.
     //
-    // [peakRms] and [heardSound] exist to tell the two handsfree failures apart: audio arriving and
-    // not being recognised, versus no audio arriving at all.
-    val lastWordsAt = remember { mutableStateOf<Long?>(null) }
+    // [lastStartedAt] floors how often a listen may begin; see start().
+    // [peakRms] and [heardSound] tell the two handsfree failures apart: audio arriving and not
+    // being recognised, versus no audio arriving at all.
+    val closedAt = remember { mutableStateOf<Long?>(null) }
+    val lastStartedAt = remember { mutableLongStateOf(0L) }
     val peakRms = remember { mutableStateOf(0) }
     val heardSound = remember { mutableStateOf(false) }
-
-    // Hoisted for the same reason [discarding] is, and it was a bug before it was hoisted: the
-    // listener below is rebuilt on every recomposition, and partial results cause recompositions
-    // while the customer is still talking. State kept inside the listener is therefore wiped
-    // between the end of speech and the transcript arriving — which is precisely the interval this
-    // measures, so it read null on every single question.
-    val stoppedTalkingAt = remember { mutableStateOf<Long?>(null) }
 
     // The listener closes over the callers' lambdas, which are recreated on every recomposition.
     // Re-attaching it each time is cheap and keeps a stale `onResult` from answering a live turn.
@@ -189,8 +188,7 @@ fun rememberSpeechInput(
                 listening = listening,
                 partial = partial,
                 discarding = discarding,
-                stoppedTalkingAt = stoppedTalkingAt,
-                lastWordsAt = lastWordsAt,
+                closedAt = closedAt,
                 peakRms = peakRms,
                 heardSound = heardSound,
                 onResult = onResult,
@@ -216,6 +214,8 @@ fun rememberSpeechInput(
             listening = listening,
             partial = partial,
             discarding = discarding,
+            closedAt = closedAt,
+            lastStartedAt = lastStartedAt,
             isGranted = { granted.value },
             requestPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
             onProblem = onProblem,
@@ -238,6 +238,8 @@ private class RecognizerSpeechInput(
     override val listening: MutableState<Boolean>,
     override val partial: MutableState<String>,
     private val discarding: MutableState<Boolean>,
+    private val closedAt: MutableState<Long?>,
+    private val lastStartedAt: MutableLongState,
     private val isGranted: () -> Boolean,
     private val requestPermission: () -> Unit,
     private val onProblem: (SpeechProblem) -> Unit,
@@ -255,6 +257,24 @@ private class RecognizerSpeechInput(
         // Starting a recogniser that is already listening throws away the utterance in progress on
         // some implementations and is ignored on others. Neither is what the caller meant.
         if (listening.value) return
+
+        // A second start too soon after the last one is refused.
+        //
+        // Android reports a terminal callback before the recognition service has finished letting
+        // go, and starting inside that window returns ERROR_CLIENT — which costs a recovery
+        // backoff, so one wasted start becomes seconds of a microphone that looks open and hears
+        // nothing. It showed up as two "microphone open" lines 83ms and 100ms apart, which is not
+        // a rate anything here asks for on purpose.
+        //
+        // The platform offers no signal for "the service has released", so a floor on the restart
+        // rate is what is left. A rate limit, not a guess about state: below this gap a start is
+        // known to fail, above it the service has had time.
+        val since = System.currentTimeMillis() - lastStartedAt.longValue
+        if (since < MIN_RESTART_GAP_MS) {
+            Log.i(SPEECH_TAG, "declining a restart ${since}ms after the last")
+            return
+        }
+        lastStartedAt.longValue = System.currentTimeMillis()
         listening.value = true
         discarding.value = false
         partial.value = ""
@@ -320,6 +340,9 @@ private class RecognizerSpeechInput(
 
     override fun stop() {
         if (!listening.value) return
+        // The one moment in this sequence the app decides. Everything measured from here is the
+        // gap between two events it can see, not an inference about what a callback meant.
+        closedAt.value = System.currentTimeMillis()
         recognizer?.stopListening()
     }
 
@@ -333,6 +356,16 @@ private class RecognizerSpeechInput(
 }
 
 private const val SPEECH_TAG = "chatty.speech"
+
+/**
+ * The shortest gap allowed between one listen starting and the next.
+ *
+ * Android gives no signal for "the recognition service has released", and starting inside that
+ * window returns ERROR_CLIENT. On this handset the failing restarts came 83ms and 100ms after the
+ * previous one, and no successful listen has been seen starting sooner than a quarter of a second,
+ * so that is where the floor sits.
+ */
+private const val MIN_RESTART_GAP_MS = 250L
 
 /** The recogniser's own name for a failure, because the integer alone tells a reader nothing. */
 private fun Int.errorName(): String = when (this) {
@@ -376,8 +409,7 @@ private class RecognitionCallbacks(
     private val listening: MutableState<Boolean>,
     private val partial: MutableState<String>,
     private val discarding: MutableState<Boolean>,
-    private val stoppedTalkingAt: MutableState<Long?>,
-    private val lastWordsAt: MutableState<Long?>,
+    private val closedAt: MutableState<Long?>,
     private val peakRms: MutableState<Int>,
     private val heardSound: MutableState<Boolean>,
     private val onResult: (question: String, listenedMs: Long?) -> Unit,
@@ -390,13 +422,11 @@ private class RecognitionCallbacks(
     override fun onResults(results: Bundle?) {
         listening.value = false
         partial.value = ""
-        // The last time new words arrived, not the end-of-speech callback: on this handset that
-        // callback fires ~10ms before this one, so it measures recognition finishing rather than
-        // the customer finishing.
-        val listenedMs = lastWordsAt.value?.let { System.currentTimeMillis() - it }
-        Log.i(SPEECH_TAG, "results after ${listenedMs}ms of quiet, peak rms ${peakRms.value}")
-        stoppedTalkingAt.value = null
-        lastWordsAt.value = null
+        // From the moment this app closed the utterance. Null when the recogniser ended the turn
+        // on its own, which is a different thing and must not be reported as the same number.
+        val listenedMs = closedAt.value?.let { System.currentTimeMillis() - it }
+        Log.i(SPEECH_TAG, "transcript ${listenedMs}ms after closing, peak rms ${peakRms.value}")
+        closedAt.value = null
         if (cancelled()) return
         val text = results
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -419,8 +449,7 @@ private class RecognitionCallbacks(
                 "${if (heardSound.value) "speech was detected" else "no speech detected"}, " +
                 "peak rms ${peakRms.value}",
         )
-        stoppedTalkingAt.value = null
-        lastWordsAt.value = null
+        closedAt.value = null
         if (cancelled()) return
         onProblem(
             when (error) {
@@ -458,33 +487,24 @@ private class RecognitionCallbacks(
         if (level > peakRms.value) peakRms.value = level
     }
     override fun onBufferReceived(buffer: ByteArray?) = Unit
+
     /**
-     * The recogniser has decided the customer stopped talking.
+     * The recogniser believes the customer has stopped talking. Deliberately nothing is recorded.
      *
-     * The start of the only leg of a turn that happens before the turn does: everything between
-     * here and [onResults] is the recogniser making up its mind, and in handsfree that includes the
-     * fixed silence it waits out before it will call a sentence finished. It was invisible for the
-     * life of this app — the trace begins when the *question arrives* — which made the wait the
-     * customer feels most sharply the one nobody could put a number on.
-     *
-     * Stored in hoisted state rather than a field here, because this object does not survive the
-     * interval it is timing. See [stoppedTalkingAt].
+     * This used to stamp the start of the wait between the last word and the transcript. On a
+     * handset the stamp produced 950, 16, 575 and 750 ms across four comparable turns; the 16 ms
+     * one gives it away, because the recogniser revises a partial as part of finalising, so the
+     * number was describing its own bookkeeping rather than the customer. A duration that
+     * unpredictable reads as authoritative and is not, so the measurement moved to the one instant
+     * this app decides: [SpeechInput.stop]. See `closedAt` in [rememberSpeechInput].
      */
-    override fun onEndOfSpeech() {
-        stoppedTalkingAt.value = System.currentTimeMillis()
-    }
+    override fun onEndOfSpeech() = Unit
     override fun onPartialResults(partialResults: Bundle?) {
         if (discarding.value) return
         partialResults
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
-            ?.let {
-                // Only when the words actually changed. A recogniser that repeats its current best
-                // guess on a timer would otherwise keep resetting the clock and report no wait at
-                // all, which is the opposite of what this measures.
-                if (it != partial.value) lastWordsAt.value = System.currentTimeMillis()
-                partial.value = it
-            }
+            ?.let { partial.value = it }
     }
     override fun onEvent(eventType: Int, params: Bundle?) = Unit
 }
