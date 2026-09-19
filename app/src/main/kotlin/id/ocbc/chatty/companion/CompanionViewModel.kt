@@ -412,6 +412,13 @@ class CompanionViewModel @Inject constructor(
             return
         }
 
+        // A question that arrived is proof the ear is pointed at the right language, which is what
+        // decides whether the *next* failure is enough to move it on its own. Set here rather than
+        // in the recogniser callback because the agent's own voice coming back through the
+        // microphone is not evidence of anything, and it is discarded just above.
+        earHasWorked = true
+        unusableRecognitions = 0
+
         val history = current.transcript + TranscriptEntry(Speaker.CUSTOMER, text)
         // The language of the *question*, adopted before the turn runs.
         //
@@ -882,10 +889,17 @@ class CompanionViewModel @Inject constructor(
         // and this is the case where there is no question to read. See [ListenLanguage.afterFailure].
         if (problem == SpeechProblem.NOT_UNDERSTOOD) {
             unusableRecognitions += 1
-            val decision = ListenLanguage.afterFailure(_state.value.listenFor, unusableRecognitions)
+            val decision = ListenLanguage.afterFailure(
+                current = _state.value.listenFor,
+                failures = unusableRecognitions,
+                proven = earHasWorked,
+            )
             unusableRecognitions = decision.streak
             if (decision.language != _state.value.listenFor) {
-                Log.i(TAG, "speech kept failing to transcribe; listening for ${decision.language.label} now")
+                Log.i(TAG, "speech would not transcribe; listening for ${decision.language.label} now")
+                // The new ear is unproven by definition, so the next failure on it is decisive too
+                // and the customer cannot be stranded on a second wrong guess.
+                earHasWorked = false
                 _state.update { it.copy(listenFor = decision.language) }
             }
         } else if (problem == SpeechProblem.NO_MATCH) {
@@ -913,6 +927,18 @@ class CompanionViewModel @Inject constructor(
      * knowing about.
      */
     private var unusableRecognitions = 0
+
+    /**
+     * Whether the language currently being listened for has ever produced a transcript here.
+     *
+     * The evidence behind how readily the ear is allowed to move. Until something has actually been
+     * heard, the language being listened for is a default nobody confirmed, so the first failure is
+     * the best information available and is acted on. Once it has worked, a single failure is far
+     * more likely to be a cough than a change of language, and it takes two.
+     *
+     * Reset whenever the ear moves, because the new one is unproven by exactly the same argument.
+     */
+    private var earHasWorked = false
 
     /**
      * Points the conversation at the language the app is in.
